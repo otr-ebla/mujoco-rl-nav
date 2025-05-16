@@ -25,4 +25,11 @@ Develop a reinforcement learning agent that enables a mobile robot to:
    git clone https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation.git
    cd MuJoCo_HumanAware_MobileRobot_RLNavigation
 
+2. **Create and activate a Python virtual environment**
+    ```bash
+    python3 -m venv mujoco_env
+    source mujoco_env/bin/activate     # On Windows: venv\Scripts\activate
 
+2. **Create and activate a Python virtual environment**
+    ```bash
+    pip install -r requirements.txt
