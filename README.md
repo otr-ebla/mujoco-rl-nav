@@ -1,22 +1,32 @@
 # 🤖 MuJoCo Human-Aware Mobile Robot RL Navigation
-This repository contains a Reinforcement Learning (RL) framework for training mobile robots to navigate in human-populated indoor environments using the MuJoCo physics engine. The robot uses simulated **laser sensor data** to perceive its surroundings and learns to navigate safely and efficiently while being aware of nearby humans.
+
+This repository provides an **end-to-end Reinforcement Learning (RL) framework** for training mobile robots to autonomously navigate in indoor environments populated with humans. The framework is built on top of the **MuJoCo physics engine** and uses simulated **laser sensor data** as raw input. The robot learns navigation policies entirely from sensory input to motion output — without any hand-crafted navigation stack — making this a truly end-to-end learning approach.
 
 ## 🧠 Project Objective
 
-Develop a reinforcement learning agent that enables a mobile robot to:
+Develop a fully autonomous RL agent that enables a mobile robot to:
 - Navigate toward target destinations
 - Avoid static and dynamic obstacles (including humans)
-- Learn human-aware behaviors using reward shaping or social norms
-- Operate with limited laser-based perception
+- Learn socially-aware behaviors through reward shaping or normative modeling
+- Operate using only low-dimensional laser-based perception as observations
 
 ## ⚙️ Features
 
-- 🚶 Human-aware navigation using RL
-- 🧭 Goal-reaching with obstacle avoidance
-- 🧩 MuJoCo-based simulation with dynamic environments
-- 🔦 Laser scan input as observation space
-- 📚 Modular training with algorithms from Stable-Baselines3 or custom implementations
-- 🧪 Evaluation mode for trained agents
+- 🧠 **End-to-end RL pipeline** from laser input to velocity commands  
+- 🚶 Human-aware navigation using RL  
+- 🧭 Goal-reaching with obstacle avoidance  
+- 🧩 MuJoCo-based simulation with dynamic environments  
+- 🔦 Raw laser scan input as the observation space  
+- 📚 Modular training with Stable-Baselines3 algorithms or custom policies  
+- 🧪 Evaluation mode for benchmarking trained agents  
+
+## 📦 Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation.git
+   cd MuJoCo_HumanAware_MobileRobot_RLNavigation
+
 
 ## 📦 Installation
 
