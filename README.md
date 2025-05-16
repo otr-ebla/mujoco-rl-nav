@@ -1,6 +1,6 @@
 # 🤖 MuJoCo Human-Aware Mobile Robot RL Navigation
 
-This repository provides an **end-to-end Reinforcement Learning (RL) framework** for training mobile robots to autonomously navigate in indoor environments populated with humans. The framework is built on top of the **MuJoCo physics engine** and uses simulated **laser sensor data** as raw input. The robot learns navigation policies entirely from sensory input to motion output — without any hand-crafted navigation stack — making this a truly end-to-end learning approach.
+This repository provides an **end-to-end Reinforcement Learning (RL) framework** for training mobile robots to autonomously navigate in indoor environments populated with humans. The framework is built on top of the **MuJoCo physics engine** and uses simulated **laser sensor data** as raw input. The robot learns navigation policies entirely from sensory input to motion output.
 
 ## 🧠 Project Objective
 
