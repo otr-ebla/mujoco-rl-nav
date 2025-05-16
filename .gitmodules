@@ -1,0 +1,6 @@
+[submodule "JHSM"]
+	path = JHSM
+	url = https://github.com/TommasoVandermeer/JHSFM.git
+[submodule "JHSFM"]
+	path = JHSFM
+	url = https://github.com/TommasoVandermeer/JHSFM.git

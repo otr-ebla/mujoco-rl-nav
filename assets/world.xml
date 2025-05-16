@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mujoco model="indoor_environment">
+  <option gravity="0 0 -9.81" timestep="0.1" />
+  <asset>
+    <!-- Texture scacchiera blu chiaro e blu scuro -->
+    <texture name="chessboard" type="2d" builtin="checker" rgb1="1 1 1" rgb2="0.5 0.5 0.5" width="100" height="100"/>
+    <material name="chessboard_material" texture="chessboard" texrepeat="0.5 0.5" texuniform="true"/>
+    <material name="sphere_material" rgba="1 0.2 0.2 1"/>
+    <material name="cube_material" rgba="0.2 0.2 1 1"/>
+    <material name="agent_material" rgba="0 0 0 1"/>
+    <material name="wall_material" rgba="0.5 0.5 0.7 1"/>
+    <material name="arrow_material" rgba="0 1 0 1"/>
+    <material name="floor_material" rgba="0.9 0.9 0.9 1"/>
+    
+    <!-- 20 different color materials for humans -->
+    <material name="human1_material" rgba="1 0 0 1"/>          <!-- Red -->
+    <material name="human2_material" rgba="0 1 0 1"/>          <!-- Green -->
+    <material name="human3_material" rgba="0 0 1 1"/>          <!-- Blue -->
+    <material name="human4_material" rgba="1 1 0 1"/>          <!-- Yellow -->
+    <material name="human5_material" rgba="1 0 1 1"/>          <!-- Magenta -->
+    <material name="human6_material" rgba="0 1 1 1"/>          <!-- Cyan -->
+    <material name="human7_material" rgba="0.5 0 0 1"/>         <!-- Dark Red -->
+    <material name="human8_material" rgba="0 0.5 0 1"/>         <!-- Dark Green -->
+    <material name="human9_material" rgba="0 0 0.5 1"/>         <!-- Dark Blue -->
+    <material name="human10_material" rgba="0.5 0.5 0 1"/>      <!-- Olive -->
+    <material name="human11_material" rgba="0.5 0 0.5 1"/>      <!-- Purple -->
+    <material name="human12_material" rgba="0 0.5 0.5 1"/>      <!-- Teal -->
+    <material name="human13_material" rgba="1 0.5 0 1"/>        <!-- Orange -->
+    <material name="human14_material" rgba="0.5 0.25 0 1"/>     <!-- Brown -->
+    <material name="human15_material" rgba="0.85 0.85 0.85 1"/> <!-- Light Gray -->
+    <material name="human16_material" rgba="0.5 0.5 0.5 1"/>    <!-- Gray -->
+    <material name="human17_material" rgba="1 0.75 0.8 1"/>     <!-- Pink -->
+    <material name="human18_material" rgba="0.9 0.9 0 1"/>      <!-- Gold -->
+    <material name="human19_material" rgba="0.6 0.8 0.2 1"/>    <!-- Lime Green -->
+    <material name="human20_material" rgba="0.2 0.4 0.8 1"/>    <!-- Sky Blue -->
+
+    <mesh name="room_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/Floor_hospital.stl"/>
+    <mesh name="robot_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/E3.stl"/>
+    <mesh name="human_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/ybot.stl"/>
+    <mesh name="human_mesh_reversed" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/ybotr.stl"/>
+  </asset>
+
+  <worldbody>
+    <!-- Floor -->
+    <geom name="floor" type="plane" size="200 200 0.1" pos="0 0 0" material="chessboard_material"/>
+    
+    <!-- Lighting -->
+    <!-- <light name="light1" pos="0 0 10" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.1 0.1 0.1" castshadow="true"/> -->
+    <!-- <light name="sunlight" directional="true" dir="1 0 -1" diffuse="1.0 0.95 0.8" specular="0.2 0.2 0.2" castshadow="true"/> -->
+
+
+    <!-- Agent -->
+    <body name="agent_body" pos="0 0 1">
+      <geom name="agent" type="mesh" mesh="robot_mesh" pos="0 0 -0.75"/>
+      <joint name="slider_x" type="slide" axis="1 0 0"/>
+      <joint name="slider_y" type="slide" axis="0 1 0"/>
+      <joint name="hinge_z" type="hinge" axis="0 0 1"/>
+      <!-- Arrow shaft -->
+      <geom name="arrow_shaft" type="box" size="0.5 0.1 0.01" pos="0 0 1.01" material="arrow_material"/>
+      <!-- Arrow head - two triangular shapes -->
+      <geom name="arrow_head1" type="box" size="0.2 0.1 0.01" pos="0.7 0.1 1.01" euler="0 0 -45" material="arrow_material"/>
+      <geom name="arrow_head2" type="box" size="0.2 0.1 0.01" pos="0.7 -0.1 1.01" euler="0 0 45" material="arrow_material"/>
+    </body>
+
+    <body name="room_mesh_body" pos="0 0 0">
+      <geom name="room_geom" type="mesh" mesh="room_mesh" material="wall_material" />
+    </body>
+
+    <!-- 20 Humans with different colors -->
+    <body name="human1" pos="10 0 0" euler="0 0 -0">
+      <geom name="human1_geom" type="mesh" mesh="human_mesh" material="human1_material"/>
+    </body>
+    
+    <body name="human2" pos="10 -2 0" euler="0 0 -0">
+      <geom name="human2_geom" type="mesh" mesh="human_mesh_reversed" material="human2_material"/>
+    </body>
+    
+    <body name="human3" pos="10 -4 0" euler="0 0 -0">
+      <geom name="human3_geom" type="mesh" mesh="human_mesh" material="human3_material"/>
+    </body>
+    
+    <body name="human4" pos="10 -6 0" euler="0 0 -0">
+      <geom name="human4_geom" type="mesh" mesh="human_mesh_reversed" material="human4_material"/>
+    </body>
+    
+    <body name="human5" pos="10 -8 0" euler="0 0 -0">
+      <geom name="human5_geom" type="mesh" mesh="human_mesh" material="human5_material"/>
+    </body>
+    
+    <body name="human6" pos="10 -10 0" euler="0 0 -0">
+      <geom name="human6_geom" type="mesh" mesh="human_mesh_reversed" material="human6_material"/>
+    </body>
+    
+    <body name="human7" pos="10 -12 0" euler="0 0 -0">
+      <geom name="human7_geom" type="mesh" mesh="human_mesh" material="human7_material"/>
+    </body>
+    
+    <body name="human8" pos="10 -14 0" euler="0 0 -0">
+      <geom name="human8_geom" type="mesh" mesh="human_mesh_reversed" material="human8_material"/>
+    </body>
+    
+    <body name="human9" pos="10 -16 0" euler="0 0 -0">
+      <geom name="human9_geom" type="mesh" mesh="human_mesh" material="human9_material"/>
+    </body>
+    
+    <body name="human10" pos="10 -18 0" euler="0 0 -0">
+      <geom name="human10_geom" type="mesh" mesh="human_mesh_reversed" material="human10_material"/>
+    </body>
+    
+    <body name="human11" pos="8 0 0" euler="0 0 -0">
+      <geom name="human11_geom" type="mesh" mesh="human_mesh" material="human11_material"/>
+    </body>
+    
+    <body name="human12" pos="8 -2 0" euler="0 0 -0">
+      <geom name="human12_geom" type="mesh" mesh="human_mesh_reversed" material="human12_material"/>
+    </body>
+    
+    <body name="human13" pos="8 -4 0" euler="0 0 -0">
+      <geom name="human13_geom" type="mesh" mesh="human_mesh" material="human13_material"/>
+    </body>
+    
+    <body name="human14" pos="8 -6 0" euler="0 0 -0">
+      <geom name="human14_geom" type="mesh" mesh="human_mesh_reversed" material="human14_material"/>
+    </body>
+    
+    <body name="human15" pos="8 -8 0" euler="0 0 -0">
+      <geom name="human15_geom" type="mesh" mesh="human_mesh" material="human15_material"/>
+    </body>
+    
+    <body name="human16" pos="8 -10 0" euler="0 0 -0">
+      <geom name="human16_geom" type="mesh" mesh="human_mesh_reversed" material="human16_material"/>
+    </body>
+    
+    <body name="human17" pos="8 -12 0" euler="0 0 -0">
+      <geom name="human17_geom" type="mesh" mesh="human_mesh" material="human17_material"/>
+    </body>
+    
+    <body name="human18" pos="8 -14 0" euler="0 0 -0">
+      <geom name="human18_geom" type="mesh" mesh="human_mesh_reversed" material="human18_material"/>
+    </body>
+    
+    <body name="human19" pos="8 -16 0" euler="0 0 -0">
+      <geom name="human19_geom" type="mesh" mesh="human_mesh" material="human19_material"/>
+    </body>
+    
+    <body name="human20" pos="8 -18 0" euler="0 0 -0">
+      <geom name="human20_geom" type="mesh" mesh="human_mesh_reversed" material="human20_material"/>
+    </body>
+  </worldbody>
+
+  <sensor>
+  </sensor>
+
+  <visual>
+    <global offwidth="800" offheight="600"/>
+    <quality shadowsize="2048"/>
+    <headlight ambient="0.3 0.3 0.3" diffuse="0.7 0.7 0.7" specular="0.1 0.1 0.1"/>
+    <map znear="0.01"/>
+    <scale forcewidth="0.01" contactwidth="0.05" contactheight="0.05" jointwidth="0.05" framelength="0.2" framewidth="0.02"/>
+    <rgba contactpoint="0 0.9 0 0.7" contactforce="0 0.5 0.3 0.1"/>
+  </visual>
+</mujoco>
