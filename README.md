@@ -2,7 +2,7 @@
 
 This repository provides an **end-to-end Reinforcement Learning (RL) framework** for training mobile robots to navigate autonomously in **indoor human-populated environments**, using only **laser sensor data** as input. Built on the **MuJoCo physics engine**, the system allows learning of full behaviors from raw perception to action commands — without any traditional navigation stack.  
 
-The framework is built around the **[Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)** interface and supports multiple state-of-the-art RL algorithms including:
+The framework is built around the **[Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)** interface and supports multiple state-of-the-art deep RL algorithms including:
 - **TQC** (Truncated Quantile Critics)
 - **SAC** (Soft Actor-Critic)
 - **PPO** (Proximal Policy Optimization)
