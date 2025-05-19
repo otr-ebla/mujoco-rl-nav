@@ -33,6 +33,7 @@
     <material name="human18_material" rgba="0.9 0.9 0 1"/>      <!-- Gold -->
     <material name="human19_material" rgba="0.6 0.8 0.2 1"/>    <!-- Lime Green -->
     <material name="human20_material" rgba="0.2 0.4 0.8 1"/>    <!-- Sky Blue -->
+    <material name="sphere_material" rgba="1 0.2 0.2 1"/>
 
     <mesh name="room_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/Floor_hospital.stl"/>
     <mesh name="robot_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/E3.stl"/>
@@ -61,6 +62,8 @@
       <geom name="arrow_head1" type="box" size="0.2 0.1 0.01" pos="0.7 0.1 1.01" euler="0 0 -45" material="arrow_material"/>
       <geom name="arrow_head2" type="box" size="0.2 0.1 0.01" pos="0.7 -0.1 1.01" euler="0 0 45" material="arrow_material"/>
     </body>
+
+    <geom name="sphere" type="sphere" size="1" pos="0 0 10" material="sphere_material"/>
 
     <body name="room_mesh_body" pos="0 0 0">
       <geom name="room_geom" type="mesh" mesh="room_mesh" material="wall_material" />
