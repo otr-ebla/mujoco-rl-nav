@@ -40,8 +40,8 @@ def scenario1():
     targethuman5x = 5.8
     targethuman5y = -12.40
 
-    target_robot_x = 12.7 + random_x
-    target_robot_y = 0.0 + random_y
+    target_robot_x = -5.7
+    target_robot_y = 17.1 + random_y
 
     # return data
     return {

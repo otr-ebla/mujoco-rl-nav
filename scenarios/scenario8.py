@@ -4,44 +4,46 @@ import gymnasium as gym
 import mujoco
 import mujoco_viewer
 
-def scenario2():
+def scenario7():
     random_x = np.random.uniform(-4.5, 4.5)
     random_y = np.random.uniform(-4.5, 4.5)
-    mob_robot_startposx = -20 + random_x
-    mob_robot_startposy = 0 + random_y
-    
-    human1x = -32.0
-    human1y = 6.4
-    start_orientation_human1 = 0.0
-    targethuman1x = 9.35
-    targethuman1y = 6.4
+    mob_robot_startposx = 4.31 + random_x
+    mob_robot_startposy = -16.08 + random_y
+    mob_robot_start_orientation = 90
+    target_robot_x = 4.31 + random_x
+    target_robot_y = 9.7 + random_y
 
-    human2x = 9.35
-    human2y = -6.4
-    start_orientation_human2 = 0.0
-    targethuman2x = -32.
-    targethuman2y = -6.4
+    human1x = 11.23
+    human1y = -11.23
+    start_orientation_human1 = 133
+    targethuman1x = -4.22
+    targethuman1y = 5.14
 
-    human3x = -5.7
-    human3y = 17.1
-    start_orientation_human3 = -90.0
-    targethuman3x = -5.7
-    targethuman3y = -17.1
+    human2y = 10.8
+    human2x = 8.57
+    start_orientation_human2 = -120
+    targethuman2x = -6.15
+    targethuman2y = -10.19
 
-    human4x = 0.0
-    human4y = -17.1
+    human3x = -12.6
+    human3y = 0.0
+    start_orientation_human3 = 0.0
+    targethuman3x = 9.45
+    targethuman3y = 0.0
+
+    human4x = -2.32
+    human4y = -12.43
     start_orientation_human4 = 90.0
-    targethuman4x = 0
-    targethuman4y = 17.1    
+    targethuman4x = -2.32
+    targethuman4y = 7.7  
 
-    human5x = 5.8
-    human5y = 17.58
+    human5x = 3.0
+    human5y = 9.44
     start_orientation_human5 = -90.0
-    targethuman5x = 5.8
-    targethuman5y = -12.40
+    targethuman5x = 8.32
+    targethuman5y = -13.33
 
-    target_robot_x = -5.7 
-    target_robot_y = -19.56 + random_y
+    
 
     # return data
     return {
