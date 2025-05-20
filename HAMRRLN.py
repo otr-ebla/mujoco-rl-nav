@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 import time
 import random
 from scenarios.scenario1 import scenario1, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8 
+import jax.numpy as jnp
 
 class hamrrln(mobilerobotRL):
     def __init__(self, num_rays = 108, model_path = "assets/world.xml") -> None:
@@ -56,28 +57,39 @@ class hamrrln(mobilerobotRL):
         # Reset the environment
         # Choose a random scenario
         # Generate a random integer between 1 and 8
-        scenario_switch = {
-            1: scenario1,
-            2: scenario2,
-            3: scenario3,
-            4: scenario4,
-            5: scenario5,
-            6: scenario6,
-            7: scenario7,
-            8: scenario8
-        }
-
+        scenarios = [scenario1, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8]
         random_scenario = random.randint(1, 8)
-        data_scenario = scenario_switch.get(random_scenario, lambda: None())()
+        data_scenario = scenarios[random_scenario - 1]()
 
+        mob_robot_startposx = data_scenario["mob_robot_startposx"]  
+        mob_robot_startposy = data_scenario["mob_robot_startposy"]
+        mob_robot_start_orientation = data_scenario["mob_robot_start_orientation"]  
+
+        target_robot_x = data_scenario["target_robot_x"]    
+        target_robot_y = data_scenario["target_robot_y"]
+
+        humans_goal = jnp.array([[data_scenario["targethuman1x"], data_scenario["targethuman1y"]],
+                                  [data_scenario["targethuman2x"], data_scenario["targethuman2y"]],
+                                  [data_scenario["targethuman3x"], data_scenario["targethuman3y"]],
+                                  [data_scenario["targethuman4x"], data_scenario["targethuman4y"]],
+                                  [data_scenario["targethuman5x"], data_scenario["targethuman5y"]]])
+        
+    
+        
+        
+        # Set human positions to their episode-specific starting positions
+        humans_id = np.zeros(5, dtype=int)
+        for i in range(5):
+            humans_id[i] = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"human{i+1}")
+            self.model.body_pos[humans_id[i], :] = [data_scenario[f"human{i+1}x"], data_scenario[f"human{i+1}y"], 0.0]
 
 
 
         # Set mobile robot and sphere positions
-        self.data.qpos[:3] = [cube_x, cube_y, cube_yaw]
+        self.data.qpos[:3] = [mob_robot_startposx, mob_robot_startposy, mob_robot_start_orientation]
         sphere_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "sphere")
         if sphere_geom_id >= 0:
-            self.model.geom_pos[sphere_geom_id, :] = [sphere_x, sphere_y, 2.0]
+            self.model.geom_pos[sphere_geom_id, :] = [target_robot_x, target_robot_y, 2.0]
 
         # Reset velocities
         self.data.qvel[:] = 0

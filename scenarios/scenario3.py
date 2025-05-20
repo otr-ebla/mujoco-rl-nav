@@ -9,7 +9,7 @@ def scenario3():
     random_y = np.random.uniform(-4.5, 4.5)
     mob_robot_startposx = 30.77 + random_x
     mob_robot_startposy = -39 + random_y
-    mob_robot_start_orientation = 0.0
+    mob_robot_start_orientation = 90.0
 
     human1x = 36.39
     human1y = -27.77
@@ -48,6 +48,9 @@ def scenario3():
     return {
         "mob_robot_startposx": mob_robot_startposx,
         "mob_robot_startposy": mob_robot_startposy,
+        "mob_robot_start_orientation": mob_robot_start_orientation,
+        "target_robot_x": target_robot_x,
+        "target_robot_y": target_robot_y,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,
@@ -73,8 +76,6 @@ def scenario3():
         "start_orientation_human5": start_orientation_human5,
         "targethuman5x": targethuman5x,
         "targethuman5y": targethuman5y,
-        "target_robot_x": target_robot_x,
-        "target_robot_y": target_robot_y
     }
 
 

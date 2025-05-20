@@ -49,6 +49,9 @@ def scenario7():
     return {
         "mob_robot_startposx": mob_robot_startposx,
         "mob_robot_startposy": mob_robot_startposy,
+        "mob_robot_start_orientation": mob_robot_start_orientation,
+        "target_robot_x": target_robot_x,
+        "target_robot_y": target_robot_y,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,
@@ -74,8 +77,6 @@ def scenario7():
         "start_orientation_human5": start_orientation_human5,
         "targethuman5x": targethuman5x,
         "targethuman5y": targethuman5y,
-        "target_robot_x": target_robot_x,
-        "target_robot_y": target_robot_y
     }
 
 
