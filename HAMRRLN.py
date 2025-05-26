@@ -14,7 +14,7 @@ from jhsfm.utils import get_standard_humans_parameters
 from grid_decomp.labeled_grid import GridCell_operations
 
 class hamrrln(mobilerobotRL):
-    def __init__(self, num_rays = 108, model_path = "assets/world.xml") -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.dt = 0.25
         self.humans_state = None
@@ -126,7 +126,6 @@ class hamrrln(mobilerobotRL):
         
         return observation, info
     
-
 
 
 
@@ -336,4 +335,23 @@ class hamrrln(mobilerobotRL):
             return None
 
         return jnp.array(static_obstacles)
+    
+    def render(self):
+        if self.render_mode == "human" and self.viewer:
+            self.viewer.sync()
+            
+            if not self.training_mode:  # During evaluation
+                # Sleep exactly the model timestep to achieve real-time rendering
+                #time.sleep(self.model.opt.timestep)
+                time.sleep(0.01)  # Adjust this value for smoother rendering
+                return True
+            # elif self.current_step % 10 == 0:  
+            #     time.sleep(0.001)  # Faster rendering during training
+            return True
+        return False
+    
+    def close(self):
+        if self.viewer:
+            self.viewer.close()
+            self.viewer = None
     

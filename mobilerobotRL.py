@@ -31,6 +31,7 @@ class mobilerobotRL(gym.Env):
         self.timeout_rate = 0
         self.robot_relative_azimuth = 0
         self.model_path = model_path
+        self.training_mode = training
 
         # Mobile Robot action space
         self.action_space = gym.spaces.Box(
