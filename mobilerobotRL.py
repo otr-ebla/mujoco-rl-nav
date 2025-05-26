@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 import xml.etree.ElementTree as ET  
 
 class mobilerobotRL(gym.Env):
-    def __init__(self, num_rays = 108, training = True, log_dir="runs/default") -> None:
+    def __init__(self, num_rays = 108, training = True, log_dir="runs/default", model_path = "assets/world.xml") -> None:
         super().__init__()
         self.training = training
         self.num_rays = num_rays
@@ -30,6 +30,7 @@ class mobilerobotRL(gym.Env):
         self.collision_rate = 0
         self.timeout_rate = 0
         self.robot_relative_azimuth = 0
+        self.model_path = model_path
 
         # Mobile Robot action space
         self.action_space = gym.spaces.Box(

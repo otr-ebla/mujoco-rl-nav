@@ -9,10 +9,28 @@ import time
 import random
 from scenarios.scenario1 import scenario1, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8 
 import jax.numpy as jnp
+from jhsfm.hsfm import step
+from jhsfm.utils import get_standard_humans_parameters
+from grid_decomp.labeled_grid import GridCell_operations
 
 class hamrrln(mobilerobotRL):
     def __init__(self, num_rays = 108, model_path = "assets/world.xml") -> None:
         super().__init__()
+        self.dt = 0.25
+        self.humans_state = None
+        self.n_humans = 5
+        self.human_parameters = get_standard_humans_parameters()    
+        self.humans_goal = jnp.zeros((self.n_humans, 2), dtype=float)
+        self.grid_cell_op = GridCell_operations(cell_size=4, world_size=320)
+        self.obstacles = None
+        self.all_obstacles = True
+        self.humans_state_numpy = np.zeros((self.n_humans, 6), dtype=float)  # Initialize humans state numpy array
+
+        if self.all_obstacles:
+            self.obstacles = self.get_all_obstacles()
+
+            
+
 
     def reset(self, seed=None):
         self.episode_time_length = time.time() - self.episode_time_begin
@@ -64,24 +82,29 @@ class hamrrln(mobilerobotRL):
         mob_robot_startposx = data_scenario["mob_robot_startposx"]  
         mob_robot_startposy = data_scenario["mob_robot_startposy"]
         mob_robot_start_orientation = data_scenario["mob_robot_start_orientation"]  
+        self.data.qpos[0] = mob_robot_startposx
+        self.data.qpos[1] = mob_robot_startposy
+        self.data.qpos[2] = mob_robot_start_orientation
 
         target_robot_x = data_scenario["target_robot_x"]    
         target_robot_y = data_scenario["target_robot_y"]
 
-        humans_goal = jnp.array([[data_scenario["targethuman1x"], data_scenario["targethuman1y"]],
+        self.humans_goal = jnp.array([[data_scenario["targethuman1x"], data_scenario["targethuman1y"]],
                                   [data_scenario["targethuman2x"], data_scenario["targethuman2y"]],
                                   [data_scenario["targethuman3x"], data_scenario["targethuman3y"]],
                                   [data_scenario["targethuman4x"], data_scenario["targethuman4y"]],
-                                  [data_scenario["targethuman5x"], data_scenario["targethuman5y"]]])
-        
-    
+                                  [data_scenario["targethuman5x"], data_scenario["targethuman5y"]]]) # to feed to step() 
         
         
+
         # Set human positions to their episode-specific starting positions
-        humans_id = np.zeros(5, dtype=int)
-        for i in range(5):
+        humans_id = np.zeros(self.n_humans, dtype=int)
+        for i in range(self.n_humans):
             humans_id[i] = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"human{i+1}")
             self.model.body_pos[humans_id[i], :] = [data_scenario[f"human{i+1}x"], data_scenario[f"human{i+1}y"], 0.0]
+            # Set human orientations
+            self.model.body_quat[humans_id] = [np.cos(data_scenario[f"start_orientation_human{i+1}"]/2), 0., 0., np.sin(data_scenario[f"start_orientation_human{i+1}"]/2)]
+
 
 
 
@@ -93,7 +116,7 @@ class hamrrln(mobilerobotRL):
 
         # Reset velocities
         self.data.qvel[:] = 0
-        
+
         # Update simulation
         mujoco.mj_forward(self.model, self.data)
         
@@ -102,10 +125,215 @@ class hamrrln(mobilerobotRL):
         info = self._get_info()
         
         return observation, info
-
-    def step(self):
-        pass
-
     
 
+
+
+
+    def step(self, action):
+        max_lin_vel = 0.25
+        max_ang_vel = 1.0
+
+        lin_vel = action[0] * max_lin_vel
+        ang_vel = action[1] * max_ang_vel   
+
+        x, y, theta = self.data.qpos[:3]
+
+        dt = self.model.opt.timestep # 0.1 [s/step]
+        if (np.abs(ang_vel) > 1e-3):
+            deltax = (lin_vel/ang_vel)*(np.sin(theta+ang_vel*dt) - np.sin(theta))
+            deltay = (lin_vel/ang_vel)*(-np.cos(theta+ang_vel*dt) + np.cos(theta))
+            x += deltax
+            y += deltay
+            theta += ang_vel*dt
+        else:
+            # Updating position
+            x += lin_vel * np.cos(theta)*dt
+            y += lin_vel * np.sin(theta)*dt
+            # Updating orientation is not necessary, since we are not rotating
+            
+
+        # Set position and orientation
+        self.data.qpos[:3] = [x, y, theta]
+
+        if self.all_obstacles:
+            # Get all obstacles in the scene
+            pass
+        else:
+            # recover grid position from humans positions
+            found_obstacles = self.get_obstacles_from_human_positions(self.humans_state_numpy) # get obstacles from grid cell
+            self.obstacles = self.get_static_obstacles_formatted(found_obstacles) # get corners from obstacles names
+
+
+        humans_state_jax = jnp.array(self.humans_state_numpy, dtype=jnp.float32)
+
+        # Update humans
+        next_humans_state = step(
+            humans_state_jax,
+            self.humans_goal,
+            self.human_parameters,
+            self.obstacles,
+            self.dt,
+        )
+        self.humans_state_numpy = np.array(next_humans_state)
+        
+
+        mujoco.mj_forward(self.model, self.data)
+        
+        # Get observation and info
+        observation = self._get_obs()
+        info = self._get_info()
+        reward = 0.0
+
+        # Reward shaping part
+        terminated = False
+        truncated = False
+
+        return observation, reward, terminated, truncated, info
+    
+    # def get_humans_state(self):
+    #     humans_id = np.zeros(self.n_humans, dtype=int)
+    #     for i in range(self.n_humans):
+    #         humans_id[i] = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"human{i+1}")
+    #         self.humans_state[i, 0] = self.model.body_pos[humans_id[i], 0]
+    #         self.humans_state[i, 1] = self.model.body_pos[humans_id[i], 1]
+
+    #         angvel, linvel = self.data.cvel[humans_id[i], :3], self.data.cvel[humans_id[i], 3:6]
+    #         self.humans_state[i, 2] = linvel[1]
+    #         self.humans_state[i, 3] = linvel[0]
+
+    #         w, x, y, z = self.model.body_quat[humans_id[i]]
+    #         theta_rad = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))    
+    #         theta_wrapped = (theta_rad + np.pi) % (2 * np.pi) - np.pi
+    #         self.humans_state[i, 4] = theta_wrapped
+    #         self.humans_state[i, 5] = angvel[2]
+    #     return self.humans_state
+
+
+
+
+
+
+
+
+    def get_obstacles_from_human_positions(self, humans_state):
+        obstacles_per_human = []
+
+        for i in range(self.n_humans):
+            hx = humans_state[i, 0]
+            hy = humans_state[i, 1]
+            cell_x, cell_y = self.grid_cell_op.world_to_grid(hx, hy)
+
+            try:
+                with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt', 'r') as f:
+                    lines = f.readlines()
+
+                found_obstacles = []
+                for line in lines:
+                    # Tolleriamo sia "Cell x,y" che "Cell x, y" (con spazio)
+                    if line.startswith(f"Cell {cell_x},{cell_y}") or line.startswith(f"Cell {cell_x}, {cell_y}"):
+                        parts = line.strip().split(":", 1)
+                        if len(parts) == 2:
+                            obstacle_str = parts[1].strip()
+                            if obstacle_str:
+                                found_obstacles = obstacle_str.split("|")
+                        break  # Trovata la riga, non serve continuare
+
+                obstacles_per_human.append(found_obstacles)
+                    
+            except FileNotFoundError:
+                print("File not found")
+                return None
+
+        return obstacles_per_human
+    
+
+
+    def get_static_obstacles_formatted(obstacle_names):
+        static_obstacles = []
+
+        try:
+            with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt', 'r') as f:
+                lines = f.readlines()
+
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+
+                if line.endswith(":"):
+                    obstacle_name = line[:-1]
+                    if obstacle_name in obstacle_names:
+                        # Parse 4 vertices
+                        vertices = []
+                        for j in range(1, 5):
+                            coord_line = lines[i + j].strip()
+                            x_str, y_str = coord_line.split(',')
+                            vertices.append([float(x_str.strip()), float(y_str.strip())])
+
+                        # Create 4 edges: [v0,v1], [v1,v2], [v2,v3], [v3,v0] forn1 obstacles
+                        edges = [
+                            [vertices[0], vertices[1]],
+                            [vertices[1], vertices[2]],
+                            [vertices[2], vertices[3]],
+                            [vertices[3], vertices[0]],
+                        ]
+
+                        # Pad with a dummy edge to ensure consistent shape
+                        # nan_edge = [[jnp.nan, jnp.nan], [jnp.nan, jnp.nan]]
+                        # edges.append(nan_edge)
+
+                        static_obstacles.append(edges)
+                        i += 4  # Skip the lines we've read
+
+                i += 1
+
+        except FileNotFoundError:
+            print("boxes_2d_corners.txt not found")
+            return None
+
+        return jnp.array(static_obstacles)
+
+
+
+    def get_all_obstacles(self):
+        static_obstacles = []
+
+        try:
+            with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt', 'r') as f:
+                lines = f.readlines()
+
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+
+                if line.endswith(":"):
+                    # Parse 4 vertices
+                    vertices = []
+                    for j in range(1, 5):
+                        coord_line = lines[i + j].strip()
+                        x_str, y_str = coord_line.split(',')
+                        vertices.append([float(x_str.strip()), float(y_str.strip())])
+
+                    # Create 4 edges: [v0,v1], [v1,v2], [v2,v3], [v3,v0] forn1 obstacles
+                    edges = [
+                        [vertices[0], vertices[1]],
+                        [vertices[1], vertices[2]],
+                        [vertices[2], vertices[3]],
+                        [vertices[3], vertices[0]],
+                    ]
+
+                    # Pad with a dummy edge to ensure consistent shape
+                    # nan_edge = [[jnp.nan, jnp.nan], [jnp.nan, jnp.nan]]
+                    # edges.append(nan_edge)
+
+                    static_obstacles.append(edges)
+                    i += 4  # Skip the lines we've read
+
+                i += 1
+
+        except FileNotFoundError:
+            print("boxes_2d_corners.txt not found")
+            return None
+
+        return jnp.array(static_obstacles)
     
