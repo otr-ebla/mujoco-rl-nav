@@ -4,13 +4,13 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import mujoco
-import mujoco_viewer
+import mujoco.viewer
 from torch.utils.tensorboard import SummaryWriter
 import xml.etree.ElementTree as ET  
 
 class mobilerobotRL(gym.Env):
-    def __init__(self, num_rays = 108, training = True, log_dir="runs/default", model_path = "assets/world.xml") -> None:
-        super().__init__()
+    def __init__(self, num_rays = 108, training = True, log_dir="TENSORBOARD", model_path = "assets/world.xml") -> None:
+        super().__init__()  
         self.training = training
         self.num_rays = num_rays
         self.max_episode_steps = 1000
@@ -25,6 +25,7 @@ class mobilerobotRL(gym.Env):
         self.last_episode_result = None
         self.episode_time_length = 0
         self.episode_time_begin = 0
+        self.render_mode = None
         self.lidar_readings = None  
         self.success_rate = 0
         self.collision_rate = 0
@@ -32,6 +33,17 @@ class mobilerobotRL(gym.Env):
         self.robot_relative_azimuth = 0
         self.model_path = model_path
         self.training_mode = training
+
+        # robot_pos, target_pos, robot_rot_matrix, lidar_readings
+        self.robot_pos = np.zeros(3)
+        self.target_pos = np.zeros(3)
+        self.robot_rot_matrix = np.eye(3)
+        self.lidar_readings = np.zeros(self.num_rays)
+
+        self.episode_count = 0
+        self.success_count = 0
+        self.collision_count = 0
+        self.timeout_count = 0
 
         # Mobile Robot action space
         self.action_space = gym.spaces.Box(
@@ -93,7 +105,11 @@ class mobilerobotRL(gym.Env):
         
         # Add lidar rangefinder sensor to the mobile robot body
         for i in range(self.num_rays):
-            angle = (i / self.num_rays) * 2 * np.pi
+            #angle = (i / self.num_rays) * 2 * np.pi
+
+            angle = (-np.pi / self.num_rays) * i + np.pi / 2  
+            angle = (angle + np.pi) % (2 * np.pi) - np.pi  # Normalize to [-pi, pi]
+
             cos_angle = np.cos(angle)
             sin_angle = np.sin(angle)
 
@@ -118,15 +134,22 @@ class mobilerobotRL(gym.Env):
         self.viewer.cam.elevation = -90.0
         self.viewer.cam.lookat[:] = [0, 0, 1]
 
-    def _get_obs(self, robot_pos, target_pos, robot_rot_matrix, lidar_readings):
-        self.lidar_readings = lidar_readings
-        self.lidar_readings = np.array(lidar_readings)
-        self.lidar_readings = lidar_readings.flatten()
+    def _get_obs(self):
+        
+        self.lidar_readings = np.array([self.data.sensordata[lidar_id] for lidar_id in self.lidar_sensor_ids])
+        self.lidar_readings = self.lidar_readings.flatten()
 
-        robot_forward_vector = robot_rot_matrix[:, 0]
+        agent_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "agent_body")
+        self.robot_pos = self.data.xpos[agent_body_id].copy()
+
+        sphere_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "sphere")
+        self.target_pos = self.data.geom_xpos[sphere_geom_id].copy()
+        self.robot_rot_matrix = self.data.xmat[agent_body_id].reshape(3, 3)
+
+        robot_forward_vector = self.robot_rot_matrix[:, 0]
         robot_yaw_angle = np.arctan2(robot_forward_vector[1], robot_forward_vector[0])
 
-        relative_position = target_pos - robot_pos
+        relative_position = self.target_pos - self.robot_pos
         distance_target_robot = np.linalg.norm(relative_position[:2])
         global_robot_azimuth = np.arctan2(relative_position[1], relative_position[0])
 
@@ -136,6 +159,26 @@ class mobilerobotRL(gym.Env):
         obs = np.concatenate((self.lidar_readings, [distance_target_robot, self.robot_relative_azimuth]))
         return obs.astype(np.float32)
     
+    def _get_info(self):
+        agent_pos = np.zeros(3)
+        sphere_pos = np.zeros(3)
+
+        agent_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "agent_body")  
+        if agent_body_id >= 0:
+            agent_pos = self.data.xpos[agent_body_id].copy()
+
+        sphere_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "sphere")
+        if sphere_geom_id >= 0:
+            sphere_pos = self.data.geom_xpos[sphere_geom_id].copy()
+        
+        distance_to_sphere = np.linalg.norm(sphere_pos - agent_pos)
+        #print(f"Distance to sphere: {distance_to_sphere:.2f}")
+        return {
+            "distance_to_sphere": distance_to_sphere,
+            "cube_position": agent_pos,
+            "sphere_position": sphere_pos
+        }
+
     def update_episode_metrics(self, result: str):
         self.episode_counter += 1
         if result == "success":
@@ -187,8 +230,8 @@ class mobilerobotRL(gym.Env):
         
         return {
             "distance_to_sphere": distance_to_sphere,
-            "cube_position": cube_pos,
-            "sphere_position": sphere_pos
+            "robot_position": cube_pos,
+            "target_position": sphere_pos
         }
 
 
@@ -384,12 +427,3 @@ class mobilerobotRL(gym.Env):
             self.render()
 
         return observation, reward, terminated, truncated, info
-
-    def render(self, mode='human'):
-        pass
-    
-    def check_collision(self):
-        raise NotImplementedError("Implementarion of check_collision method is required in the derived class.")
-    
-    def close(self):
-        self.writer.close()

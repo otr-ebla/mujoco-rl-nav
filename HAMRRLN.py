@@ -1,33 +1,113 @@
 import numpy as np
 import gymnasium as gym 
 import mujoco
-import mujoco_viewer
+import mujoco.viewer
 from mobilerobotRL import mobilerobotRL
 import os
 import xml.etree.ElementTree as ET
 import time
 import random
-from scenarios.scenario1 import scenario1, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8 
+from scenarios.scenario1 import scenario1
+from scenarios.scenario2 import scenario2   
+from scenarios.scenario3 import scenario3
+from scenarios.scenario4 import scenario4
+from scenarios.scenario5 import scenario5
+from scenarios.scenario6 import scenario6
+from scenarios.scenario7 import scenario7
+from scenarios.scenario8 import scenario8
+
 import jax.numpy as jnp
 from jhsfm.hsfm import step
 from jhsfm.utils import get_standard_humans_parameters
 from grid_decomp.labeled_grid import GridCell_operations
+from torch.utils.tensorboard import SummaryWriter
 
 class hamrrln(mobilerobotRL):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, num_rays=108, model_path="assets/world.xml", training=True, n_humans = 5, log_dir="TENSORBOARD/", render_mode=None):
+        #super().__init__(num_rays=num_rays, training=training_mode, model_path=model_path, )
+        
         self.dt = 0.25
         self.humans_state = None
-        self.n_humans = 5
-        self.human_parameters = get_standard_humans_parameters()    
-        self.humans_goal = jnp.zeros((self.n_humans, 2), dtype=float)
+        self.n_humans = n_humans
+        self.human_parameters = get_standard_humans_parameters(self.n_humans)    
+        self.humans_goals = jnp.zeros((self.n_humans, 2), dtype=float)
         self.grid_cell_op = GridCell_operations(cell_size=4, world_size=320)
         self.obstacles = None
         self.all_obstacles = True
-        self.humans_state_numpy = np.zeros((self.n_humans, 6), dtype=float)  # Initialize humans state numpy array
+        self.humans_state_numpy = np.zeros((self.n_humans, 6), dtype=float)
 
         if self.all_obstacles:
-            self.obstacles = self.get_all_obstacles()
+                self.obstacles = jnp.stack([self.get_all_obstacles()] * self.n_humans)
+
+        self.render_mode = render_mode  
+        self.training = training
+        self.num_rays = num_rays
+        self.max_episode_steps = 1000
+        self.current_step = 0
+        self.previous_distance = 100
+        self.episode_return = 0
+        self.mean_episode_return = 0
+        self.episode_counter = 0
+        self.success_counter = 0
+        self.collision_counter = 0
+        self.timeout_counter = 0
+        self.last_episode_result = None
+        self.episode_time_length = 0
+        self.episode_time_begin = 0
+        self.lidar_readings = None  
+        self.success_rate = 0
+        self.collision_rate = 0
+        self.timeout_rate = 0
+        self.robot_relative_azimuth = 0
+        self.model_path = model_path
+        self.training_mode = training
+
+        self.humans_start_positions = jnp.zeros((self.n_humans, 2), dtype=float)    
+
+        # robot_pos, target_pos, robot_rot_matrix, lidar_readings
+        self.robot_pos = np.zeros(3)
+        self.target_pos = np.zeros(3)
+        self.robot_rot_matrix = np.eye(3)
+        self.lidar_readings = np.zeros(self.num_rays)
+
+        self.episode_count = 0
+        self.success_count = 0
+        self.collision_count = 0
+        self.timeout_count = 0
+
+        # Mobile Robot action space
+        self.action_space = gym.spaces.Box(
+            low = np.array([0, -1.0]),
+            high = np.array([1.0, 1.0]),
+            shape = (2, ),
+            dtype = np.float32
+        )
+
+        # Mobile Robot observation space
+        self.observation_space = gym.spaces.Box(
+            low = np.array([0.0]*num_rays+[0.0, -np.pi]),
+            high = np.array([30.0]*num_rays+[0.0, np.pi]),
+            shape = (num_rays + 2, ),
+            dtype = np.float32
+        )
+
+        self.writer = SummaryWriter(log_dir=log_dir)
+
+        self.xml_model = self.load_and_modify_xml_model()
+        self.model = mujoco.MjModel.from_xml_string(self.xml_model) 
+        self.data = mujoco.MjData(self.model)
+
+        self.mobile_robot_ID = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "agent_body")
+        self.lidar_sensor_ids = [
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, f"lidar_{i}")
+            for i in range(self.num_rays)
+        ]
+
+        self.viewer = None
+        if self.render_mode == "human":
+            self._setup_viewer()
+
+        self.reset()
 
             
 
@@ -89,21 +169,25 @@ class hamrrln(mobilerobotRL):
         target_robot_x = data_scenario["target_robot_x"]    
         target_robot_y = data_scenario["target_robot_y"]
 
-        self.humans_goal = jnp.array([[data_scenario["targethuman1x"], data_scenario["targethuman1y"]],
-                                  [data_scenario["targethuman2x"], data_scenario["targethuman2y"]],
-                                  [data_scenario["targethuman3x"], data_scenario["targethuman3y"]],
-                                  [data_scenario["targethuman4x"], data_scenario["targethuman4y"]],
-                                  [data_scenario["targethuman5x"], data_scenario["targethuman5y"]]]) # to feed to step() 
+
+        print(f"Scenario {random_scenario} loaded: target_robot_x={target_robot_x}, target_robot_y={target_robot_y}")
+
+        self.humans_goals = jnp.array([[ [data_scenario["human1x"], data_scenario["human1y"]], [data_scenario["targethuman1x"], data_scenario["targethuman1y"]]],
+                                    [ [data_scenario["human2x"], data_scenario["human2y"]], [data_scenario["targethuman2x"], data_scenario["targethuman2y"]]],
+                                    [ [data_scenario["human3x"], data_scenario["human3y"]], [data_scenario["targethuman3x"], data_scenario["targethuman3y"]]],
+                                    [ [data_scenario["human4x"], data_scenario["human4y"]], [data_scenario["targethuman4x"], data_scenario["targethuman4y"]]],
+                                    [ [data_scenario["human5x"], data_scenario["human5y"]], [data_scenario["targethuman5x"], data_scenario["targethuman5y"]]]], dtype=jnp.float32)
         
-        
+        self.humans_current_goals = jnp.zeros((self.n_humans, 2), dtype=float)
 
         # Set human positions to their episode-specific starting positions
         humans_id = np.zeros(self.n_humans, dtype=int)
         for i in range(self.n_humans):
             humans_id[i] = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"human{i+1}")
-            self.model.body_pos[humans_id[i], :] = [data_scenario[f"human{i+1}x"], data_scenario[f"human{i+1}y"], 0.0]
+            print(f"Human start position for human {i+1}: x={data_scenario[f'human{i+1}x']}, y={data_scenario[f'human{i+1}y']}")
+            self.model.body_pos[humans_id[i], :2] = [data_scenario[f"human{i+1}x"], data_scenario[f"human{i+1}y"]]
             # Set human orientations
-            self.model.body_quat[humans_id] = [np.cos(data_scenario[f"start_orientation_human{i+1}"]/2), 0., 0., np.sin(data_scenario[f"start_orientation_human{i+1}"]/2)]
+            self.model.body_quat[humans_id[i]] = [np.cos(data_scenario[f"start_orientation_human{i+1}"]/2), 0., 0., np.sin(data_scenario[f"start_orientation_human{i+1}"]/2)]
 
 
 
@@ -119,10 +203,32 @@ class hamrrln(mobilerobotRL):
 
         # Update simulation
         mujoco.mj_forward(self.model, self.data)
-        
-        # Get observation and info
-        observation = self._get_obs()
-        info = self._get_info()
+
+        self.humans_state_numpy = np.zeros((self.n_humans, 6), dtype=float)
+
+        # Set humans goal
+        self.humans_current_goals = jnp.array(self.humans_goals[:, 0], dtype=jnp.float32)  # Start with the first goal for each human
+
+        for i in range(self.n_humans):
+            # Position
+            self.humans_state_numpy[i, 0] = self.model.body_pos[humans_id[i], 0]  # x
+            self.humans_state_numpy[i, 1] = self.model.body_pos[humans_id[i], 1]  # y
+            
+            # Velocity (initially zero)
+            self.humans_state_numpy[i, 2] = 0.0  # vx
+            self.humans_state_numpy[i, 3] = 0.0  # vy
+            
+            # Orientation from quaternion
+            w, x, y, z = self.model.body_quat[humans_id[i]]
+            theta_rad = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))    
+            self.humans_state_numpy[i, 4] = theta_rad  # orientation
+            
+            # Angular velocity (initially zero)
+            self.humans_state_numpy[i, 5] = 0.0  # angular velocity
+            
+            # Get observation and info
+            observation = self._get_obs()
+            info = self._get_info()
         
         return observation, info
     
@@ -134,7 +240,8 @@ class hamrrln(mobilerobotRL):
         max_ang_vel = 1.0
 
         lin_vel = action[0] * max_lin_vel
-        ang_vel = action[1] * max_ang_vel   
+        ang_vel = action[1] * max_ang_vel  
+        #print(f"Action: lin_vel={lin_vel}, ang_vel={ang_vel}") 
 
         x, y, theta = self.data.qpos[:3]
 
@@ -154,6 +261,9 @@ class hamrrln(mobilerobotRL):
 
         # Set position and orientation
         self.data.qpos[:3] = [x, y, theta]
+        
+        mujoco.mj_step(self.model, self.data)
+        self.current_step += 1
 
         if self.all_obstacles:
             # Get all obstacles in the scene
@@ -163,18 +273,34 @@ class hamrrln(mobilerobotRL):
             found_obstacles = self.get_obstacles_from_human_positions(self.humans_state_numpy) # get obstacles from grid cell
             self.obstacles = self.get_static_obstacles_formatted(found_obstacles) # get corners from obstacles names
 
+        # switch human target position to starting position if the first target is reached
+        for i in range(self.n_humans):
+            if np.linalg.norm(self.humans_state_numpy[i, :2] - self.humans_current_goals[i]) < 0.1 and self.humans_current_goals[i, 0] == self.humans_goals[i, 0, 0] and self.humans_current_goals[i, 1] == self.humans_goals[i, 0, 1]:
+                #print(f"Human {i+1} reached goal, switching to starting position.")
+                self.humans_current_goals = self.humans_current_goals.at[i].set(self.humans_goals[i, 1])
+
+            elif np.linalg.norm(self.humans_state_numpy[i, :2] - self.humans_current_goals[i]) < 0.1 and self.humans_current_goals[i, 0] == self.humans_goals[i, 1, 0] and self.humans_current_goals[i, 1] == self.humans_goals[i, 1, 1]:
+                self.humans_current_goals = self.humans_current_goals.at[i].set(self.humans_goals[i, 0]) # Switch to the first goal
 
         humans_state_jax = jnp.array(self.humans_state_numpy, dtype=jnp.float32)
-
-        # Update humans
+        print(f"Humans current goals: {self.humans_current_goals}")
+        #Update humans
         next_humans_state = step(
             humans_state_jax,
-            self.humans_goal,
+            self.humans_current_goals,
             self.human_parameters,
             self.obstacles,
             self.dt,
         )
+
         self.humans_state_numpy = np.array(next_humans_state)
+
+        humans_id = np.zeros(self.n_humans, dtype=int)
+        for i in range(self.n_humans):
+            humans_id[i] = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"human{i+1}")
+            self.model.body_pos[humans_id[i], :] = [self.humans_state_numpy[i, 0], self.humans_state_numpy[i, 1], 0.0]
+            # Set human orientations
+            self.model.body_quat[humans_id[i]] = [np.cos(self.humans_state_numpy[i, 4]/2), 0., 0., np.sin(self.humans_state_numpy[i, 4]/2)]
         
 
         mujoco.mj_forward(self.model, self.data)
@@ -182,11 +308,15 @@ class hamrrln(mobilerobotRL):
         # Get observation and info
         observation = self._get_obs()
         info = self._get_info()
+        #print("info:", info)
         reward = 0.0
 
         # Reward shaping part
         terminated = False
         truncated = False
+
+        if self.render_mode == "human":
+            self.render()
 
         return observation, reward, terminated, truncated, info
     
@@ -336,17 +466,13 @@ class hamrrln(mobilerobotRL):
 
         return jnp.array(static_obstacles)
     
-    def render(self):
-        if self.render_mode == "human" and self.viewer:
+    def render(self, mode='human'):
+        if self.viewer is None:
+            self._setup_viewer()
+        
+        if mode == 'human':
             self.viewer.sync()
-            
-            if not self.training_mode:  # During evaluation
-                # Sleep exactly the model timestep to achieve real-time rendering
-                #time.sleep(self.model.opt.timestep)
-                time.sleep(0.01)  # Adjust this value for smoother rendering
-                return True
-            # elif self.current_step % 10 == 0:  
-            #     time.sleep(0.001)  # Faster rendering during training
+            time.sleep(0.01)  # Small delay to control rendering speed
             return True
         return False
     

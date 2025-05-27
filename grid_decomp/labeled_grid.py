@@ -210,13 +210,13 @@ class GridCell_operations:
 
         return jnp.array(static_obstacles)
 
-grid = GridCell_operations(cell_size=10, world_size=320)
-obstacles = grid.parse_obstacle_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt")  # sostituisci con il tuo path
-labeled_grid = grid.label_grid(obstacles)
-grid.write_labeled_grid_to_file(labeled_grid, "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid2.txt")
-grid.clean_label_txt_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid2.txt", "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt")
+# grid = GridCell_operations(cell_size=10, world_size=320)
+# obstacles = grid.parse_obstacle_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt")  # sostituisci con il tuo path
+# labeled_grid = grid.label_grid(obstacles)
+# grid.write_labeled_grid_to_file(labeled_grid, "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid2.txt")
+# grid.clean_label_txt_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid2.txt", "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt")
 
-Obstacles_names = ["Wall11", "Wall20"]
-static_obstacles = grid.get_static_obstacles_formatted(Obstacles_names)
-print(static_obstacles.shape)
-print(static_obstacles)
+# Obstacles_names = ["Wall11", "Wall20"]
+# static_obstacles = grid.get_static_obstacles_formatted(Obstacles_names)
+# print(static_obstacles.shape)
+# print(static_obstacles)

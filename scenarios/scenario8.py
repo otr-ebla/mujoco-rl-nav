@@ -4,7 +4,7 @@ import gymnasium as gym
 import mujoco
 import mujoco_viewer
 
-def scenario7():
+def scenario8():
     random_x = np.random.uniform(-4.5, 4.5)
     random_y = np.random.uniform(-4.5, 4.5)
     mob_robot_startposx = 4.31 + random_x

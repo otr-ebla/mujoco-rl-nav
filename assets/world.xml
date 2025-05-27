@@ -33,7 +33,6 @@
     <material name="human18_material" rgba="0.9 0.9 0 1"/>      <!-- Gold -->
     <material name="human19_material" rgba="0.6 0.8 0.2 1"/>    <!-- Lime Green -->
     <material name="human20_material" rgba="0.2 0.4 0.8 1"/>    <!-- Sky Blue -->
-    <material name="sphere_material" rgba="1 0.2 0.2 1"/>
 
     <mesh name="room_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/Floor_hospital.stl"/>
     <mesh name="robot_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/E3.stl"/>
@@ -90,65 +89,7 @@
       <geom name="human5_geom" type="mesh" mesh="human_mesh" material="human5_material"/>
     </body>
     
-    <body name="human6" pos="10 -10 0" euler="0 0 -0">
-      <geom name="human6_geom" type="mesh" mesh="human_mesh_reversed" material="human6_material"/>
-    </body>
     
-    <body name="human7" pos="10 -12 0" euler="0 0 -0">
-      <geom name="human7_geom" type="mesh" mesh="human_mesh" material="human7_material"/>
-    </body>
-    
-    <body name="human8" pos="10 -14 0" euler="0 0 -0">
-      <geom name="human8_geom" type="mesh" mesh="human_mesh_reversed" material="human8_material"/>
-    </body>
-    
-    <body name="human9" pos="10 -16 0" euler="0 0 -0">
-      <geom name="human9_geom" type="mesh" mesh="human_mesh" material="human9_material"/>
-    </body>
-    
-    <body name="human10" pos="10 -18 0" euler="0 0 -0">
-      <geom name="human10_geom" type="mesh" mesh="human_mesh_reversed" material="human10_material"/>
-    </body>
-    
-    <body name="human11" pos="8 0 0" euler="0 0 -0">
-      <geom name="human11_geom" type="mesh" mesh="human_mesh" material="human11_material"/>
-    </body>
-    
-    <body name="human12" pos="8 -2 0" euler="0 0 -0">
-      <geom name="human12_geom" type="mesh" mesh="human_mesh_reversed" material="human12_material"/>
-    </body>
-    
-    <body name="human13" pos="8 -4 0" euler="0 0 -0">
-      <geom name="human13_geom" type="mesh" mesh="human_mesh" material="human13_material"/>
-    </body>
-    
-    <body name="human14" pos="8 -6 0" euler="0 0 -0">
-      <geom name="human14_geom" type="mesh" mesh="human_mesh_reversed" material="human14_material"/>
-    </body>
-    
-    <body name="human15" pos="8 -8 0" euler="0 0 -0">
-      <geom name="human15_geom" type="mesh" mesh="human_mesh" material="human15_material"/>
-    </body>
-    
-    <body name="human16" pos="8 -10 0" euler="0 0 -0">
-      <geom name="human16_geom" type="mesh" mesh="human_mesh_reversed" material="human16_material"/>
-    </body>
-    
-    <body name="human17" pos="8 -12 0" euler="0 0 -0">
-      <geom name="human17_geom" type="mesh" mesh="human_mesh" material="human17_material"/>
-    </body>
-    
-    <body name="human18" pos="8 -14 0" euler="0 0 -0">
-      <geom name="human18_geom" type="mesh" mesh="human_mesh_reversed" material="human18_material"/>
-    </body>
-    
-    <body name="human19" pos="8 -16 0" euler="0 0 -0">
-      <geom name="human19_geom" type="mesh" mesh="human_mesh" material="human19_material"/>
-    </body>
-    
-    <body name="human20" pos="8 -18 0" euler="0 0 -0">
-      <geom name="human20_geom" type="mesh" mesh="human_mesh_reversed" material="human20_material"/>
-    </body>
   </worldbody>
 
   <sensor>
