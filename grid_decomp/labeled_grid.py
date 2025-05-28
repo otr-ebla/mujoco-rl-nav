@@ -3,6 +3,8 @@ import os
 import numpy as np
 from collections import defaultdict
 import jax.numpy as jnp
+    
+import matplotlib.pyplot as plt
 
 class GridCell_operations:
     def __init__(self, cell_size=4, world_size=320):
@@ -10,6 +12,7 @@ class GridCell_operations:
         self.world_size = world_size
         self.num_cells = int(world_size / cell_size)
         self.half_world = world_size / 2
+        self.static_obstacles = []
 
     
     def parse_obstacle_file(self, filepath):
@@ -199,7 +202,7 @@ class GridCell_operations:
                         # nan_edge = [[jnp.nan, jnp.nan], [jnp.nan, jnp.nan]]
                         # edges.append(nan_edge)
 
-                        static_obstacles.append(edges)
+                        self.static_obstacles.append(edges)
                         i += 4  # Skip the lines we've read
 
                 i += 1
@@ -208,7 +211,30 @@ class GridCell_operations:
             print("boxes_2d_corners.txt not found")
             return None
 
-        return jnp.array(static_obstacles)
+        return jnp.array(self.static_obstacles)
+
+
+    def plot_obstacles_from_static(self, static_obstacles):
+        for obstacle in static_obstacles:
+            for edge in obstacle:
+                vertices = edge
+                polygon = plt.Polygon(vertices, edgecolor='black', facecolor='none')
+                plt.gca().add_patch(polygon)
+
+        plt.axis('equal')
+        plt.show()
+
+    def get_obstacle_names_from_file(self, filepath):
+        obstacle_names = []
+        
+        with open(filepath, 'r') as file:
+            for line in file:
+                obstacle_name = line.split(':')[0].strip()
+                obstacle_names.append(obstacle_name)
+        return obstacle_names
+
+# Call the function with the desired file path
+#plot_obstacles_from_file('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt')
 
 # grid = GridCell_operations(cell_size=10, world_size=320)
 # obstacles = grid.parse_obstacle_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt")  # sostituisci con il tuo path
@@ -220,3 +246,8 @@ class GridCell_operations:
 # static_obstacles = grid.get_static_obstacles_formatted(Obstacles_names)
 # print(static_obstacles.shape)
 # print(static_obstacles)
+    
+# grid = GridCell_operations(cell_size=10, world_size=320)
+# obstacles_names = grid.get_obstacle_names_from_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt")
+# static_obstacles = grid.get_static_obstacles_formatted(obstacles_names)
+# grid.plot_obstacles_from_static(static_obstacles)

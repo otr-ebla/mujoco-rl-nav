@@ -14,8 +14,8 @@ def scenario1():
     human1x = -32.0
     human1y = 6.4
     start_orientation_human1 = 0.0
-    targethuman1x = 9.35
-    targethuman1y = 6.4
+    targethuman1x = 13.25
+    targethuman1y = 3.18
 
     human2x = 9.35
     human2y = -6.4

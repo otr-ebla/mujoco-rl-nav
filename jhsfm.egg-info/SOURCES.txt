@@ -1,0 +1,7 @@
+LICENSE
+README.md
+jhsfm.egg-info/PKG-INFO
+jhsfm.egg-info/SOURCES.txt
+jhsfm.egg-info/dependency_links.txt
+jhsfm.egg-info/requires.txt
+jhsfm.egg-info/top_level.txt

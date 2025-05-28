@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: jhsfm
+Version: 0.0.1
+License-File: LICENSE
+Requires-Dist: jax
+Requires-Dist: matplotlib
+Dynamic: license-file
+Dynamic: requires-dist

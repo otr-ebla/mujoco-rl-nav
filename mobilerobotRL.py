@@ -61,8 +61,6 @@ class mobilerobotRL(gym.Env):
             dtype = np.float32
         )
 
-        self.writer = SummaryWriter(log_dir=log_dir)
-
         self.xml_model = self.load_and_modify_xml_model()
         self.model = mujoco.MjModel.from_xml_string(self.xml_model) 
         self.data = mujoco.MjData(self.model)
@@ -105,9 +103,9 @@ class mobilerobotRL(gym.Env):
         
         # Add lidar rangefinder sensor to the mobile robot body
         for i in range(self.num_rays):
-            #angle = (i / self.num_rays) * 2 * np.pi
+            angle = (i / self.num_rays) * 2 * np.pi
 
-            angle = (-np.pi / self.num_rays) * i + np.pi / 2  
+            #angle = (-np.pi / self.num_rays) * i + np.pi / 2  
             angle = (angle + np.pi) % (2 * np.pi) - np.pi  # Normalize to [-pi, pi]
 
             cos_angle = np.cos(angle)
@@ -143,6 +141,7 @@ class mobilerobotRL(gym.Env):
         self.robot_pos = self.data.xpos[agent_body_id].copy()
 
         sphere_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "sphere")
+        #print(f"TARGET POS: {self.data.geom_xpos[sphere_geom_id]}")
         self.target_pos = self.data.geom_xpos[sphere_geom_id].copy()
         self.robot_rot_matrix = self.data.xmat[agent_body_id].reshape(3, 3)
 
@@ -179,32 +178,7 @@ class mobilerobotRL(gym.Env):
             "sphere_position": sphere_pos
         }
 
-    def update_episode_metrics(self, result: str):
-        self.episode_counter += 1
-        if result == "success":
-            self.success_counter += 1
-        elif result == "collision":
-            self.collision_counter += 1
-        elif result == "timeout":
-            self.timeout_counter += 1
-
-        if self.episode_counter > 0:
-            self.success_rate = self.success_counter / self.episode_counter
-            self.collision_rate = self.collision_counter / self.episode_counter
-            self.timeout_rate = self.timeout_counter / self.episode_counter
-
-        # Log metrics to TensorBoard
-        self.writer.add_scalar("metrics/episode_return", self.episode_return, self.episode_counter)
-        self.writer.add_scalar("metrics/sucess_rate", self.success_rate, self.episode_counter)
-        self.writer.add_scalar("metrics/collision_rate", self.collision_rate, self.episode_counter)
-        self.writer.add_scalar("metrics/timeout_rate", self.timeout_rate, self.episode_counter)
-
-        # Reset the episode
-        self.episode_return = 0
-        self.mean_episode_return = 0
-        self.last_episode_result = None
-        self.episode_time_length = 0
-        self.episode_time_begin = time.time()
+    
 
     def _get_info(self):
         # Get positions using direct geom access instead of sensors
