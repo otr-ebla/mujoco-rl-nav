@@ -4,32 +4,35 @@ import gymnasium as gym
 import mujoco
 import mujoco_viewer
 
+# Scenario 7: robot deve girare tra le colonne e raggiungere il target mentre 3 umani sono nel mezzo
+
 def scenario7():
     random_x = np.random.uniform(-4.5, 4.5)
     random_y = np.random.uniform(-4.5, 4.5)
-    mob_robot_startposx = 145.64 + random_x
-    mob_robot_startposy = 45.63 + random_y
-    mob_robot_start_orientation = 180
-    target_robot_x = 144.62 + random_x
-    target_robot_y = -4.2 + random_y
+    random_angle = np.random.uniform(-90, 90)
+    mob_robot_startposx = 68.56
+    mob_robot_startposy = -10.76 + random_y
+    mob_robot_start_orientation = 90 + random_angle
+    target_robot_x = 73.0
+    target_robot_y = 9.08 + random_y
 
-    human1x = 138.79
-    human1y = 5.66
-    start_orientation_human1 = 90
-    targethuman1x = 138.79
-    targethuman1y = 35.65
+    human1x = 66.5 
+    human1y = 0 + random_y
+    start_orientation_human1 = 0
+    targethuman1x = 73.2
+    targethuman1y = 0
 
-    human2y = 26
-    human2x = 146
-    start_orientation_human2 = 180
-    targethuman2x = 131
-    targethuman2y = 25.8
+    human2x = 67.1
+    human2y = 9.2 
+    start_orientation_human2 = -90
+    targethuman2x = 67.1
+    targethuman2y = -9.8
 
-    human3x = 131
-    human3y = 5.8
-    start_orientation_human3 = 0.0
-    targethuman3x = 144.41
-    targethuman3y = 5.79
+    human3x = 71.8
+    human3y = -9.3
+    start_orientation_human3 = 90
+    targethuman3x = 71.8
+    targethuman3y =  8.48
 
     human4x = 0.0
     human4y = 0.0

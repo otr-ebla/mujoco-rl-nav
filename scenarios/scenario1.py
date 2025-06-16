@@ -4,45 +4,50 @@ import gymnasium as gym
 import mujoco
 import mujoco_viewer
 
+# Scenario 1: Il robot attraversa il corridoio centrale iniziale e raggiunge il target al fondo davanti alla parete
+#             Gli umani si incrociano lì davanti
+
 def scenario1():
-    random_x = np.random.uniform(-4.5, 4.5)
-    random_y = np.random.uniform(-4.5, 4.5)
-    mob_robot_startposx = -20 + random_x
+    delta_random = 3
+    random_x = np.random.uniform(-delta_random, delta_random)
+    random_y = np.random.uniform(-delta_random, delta_random)
+    random_angle = np.random.uniform(-90, 90)
+    mob_robot_startposx = 16.85 + random_x
     mob_robot_startposy = 0 + random_y
-    mob_robot_start_orientation = 0 
+    mob_robot_start_orientation = 0 + random_angle
     
-    human1x = -32.0
-    human1y = 6.4
+    human1x = 27.43 + random_x
+    human1y = -8.7 + random_y
     start_orientation_human1 = 0.0
-    targethuman1x = 13.25
-    targethuman1y = 3.18
+    targethuman1x = 27.43
+    targethuman1y = 7.63
 
-    human2x = 9.35
-    human2y = -6.4
-    start_orientation_human2 = 180.0
-    targethuman2x = -32.
-    targethuman2y = -6.4
+    human2x = 21.67
+    human2y = -9
+    start_orientation_human2 = -20
+    targethuman2x = 32
+    targethuman2y = 6.74
 
-    human3x = -5.7
-    human3y = 17.1
-    start_orientation_human3 = -90.0
-    targethuman3x = -5.7
-    targethuman3y = -17.1
+    human3x = 23
+    human3y = 6.74
+    start_orientation_human3 = -150
+    targethuman3x = 32.4
+    targethuman3y = -6.8
 
-    human4x = 0.0
-    human4y = -17.1
+    human4x = 32.3
+    human4y = -2.6
     start_orientation_human4 = 90.0
-    targethuman4x = 0
-    targethuman4y = 17.1    
+    targethuman4x = 16.26
+    targethuman4y = -2.6    
 
-    human5x = 5.8
-    human5y = 17.58
+    human5x = 16.26
+    human5y = 2.77
     start_orientation_human5 = -90.0
-    targethuman5x = 5.8
-    targethuman5y = -12.40
+    targethuman5x = 29.45 + random_x
+    targethuman5y = 2.77 + random_y
 
-    target_robot_x = -5.7
-    target_robot_y = 17.1 + random_y
+    target_robot_x = 32.8
+    target_robot_y = 0.0 + random_y
 
     # return data
     return {

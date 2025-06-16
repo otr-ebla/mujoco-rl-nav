@@ -4,45 +4,49 @@ import gymnasium as gym
 import mujoco
 import mujoco_viewer
 
+# Scenario 3: uguale a scenario1 e 2, ma il robot deve girare a sinistra e raggiungere il target
+
 def scenario3():
-    random_x = np.random.uniform(-4.5, 4.5)
-    random_y = np.random.uniform(-4.5, 4.5)
-    mob_robot_startposx = 30.77 + random_x
-    mob_robot_startposy = -39 + random_y
-    mob_robot_start_orientation = 90.0
+    delta_random = 3
+    random_x = np.random.uniform(-delta_random, delta_random)
+    random_y = np.random.uniform(-delta_random, delta_random)
+    random_angle = np.random.uniform(-90, 90)
+    mob_robot_startposx = 16.85 + random_x 
+    mob_robot_startposy = 0 + random_y
+    mob_robot_start_orientation = 0 + random_angle
+    
+    human1x = 27.43 + random_x
+    human1y = -8.7 + random_y
+    start_orientation_human1 = 0.0
+    targethuman1x = 27.43
+    targethuman1y = 7.63
 
-    human1x = 36.39
-    human1y = -27.77
-    start_orientation_human1 = 90
-    targethuman1x = 36.39
-    targethuman1y = -16.214
+    human2x = 21.67
+    human2y = -9
+    start_orientation_human2 = -20
+    targethuman2x = 32
+    targethuman2y = 6.74
 
-    human2x = 22.38
-    human2y = -27
-    start_orientation_human2 = 0.0
-    targethuman2x = 35.27
-    targethuman2y = -26.93
+    human3x = 23
+    human3y = 6.74
+    start_orientation_human3 = -150
+    targethuman3x = 32.4
+    targethuman3y = -6.8
 
-    human3x = 34.35
-    human3y = -23.4
-    start_orientation_human3 = -90.0
-    targethuman3x = 22.76
-    targethuman3y = -23.4
-
-    human4x = 0.0
-    human4y = 0.0
+    human4x = 32.3
+    human4y = -2.6
     start_orientation_human4 = 90.0
-    targethuman4x = 0.0
-    targethuman4y = 0.0  
+    targethuman4x = 16.26
+    targethuman4y = -2.6    
 
-    human5x = 2.0
-    human5y = 2.0
+    human5x = 16.26
+    human5y = 2.77
     start_orientation_human5 = -90.0
-    targethuman5x = 2.0
-    targethuman5y = 2.0
+    targethuman5x = 29.45 + random_x
+    targethuman5y = 2.77 + random_y
 
-    target_robot_x = 49.57 + random_x
-    target_robot_y = -22 + random_y
+    target_robot_x = 21.91
+    target_robot_y = 12.23 + random_y
 
     # return data
     return {

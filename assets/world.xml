@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mujoco model="indoor_environment">
-  <option gravity="0 0 -9.81" timestep="0.1" />
+  <option gravity="0 0 -9.81" timestep="0.01" />
   <asset>
     <!-- Texture scacchiera blu chiaro e blu scuro -->
     <texture name="chessboard" type="2d" builtin="checker" rgb1="1 1 1" rgb2="0.5 0.5 0.5" width="100" height="100"/>
@@ -34,15 +34,15 @@
     <material name="human19_material" rgba="0.6 0.8 0.2 1"/>    <!-- Lime Green -->
     <material name="human20_material" rgba="0.2 0.4 0.8 1"/>    <!-- Sky Blue -->
 
-    <mesh name="room_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/Floor_hospital.stl"/>
-    <mesh name="robot_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/E3.stl"/>
-    <mesh name="human_mesh" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/ybot.stl"/>
-    <mesh name="human_mesh_reversed" file="/home/LABAUT/alberto_vaglio/JHSFM/SFM/ybotr.stl"/>
+    <mesh name="room_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/Floor_hospital2.stl"/>
+    <mesh name="robot_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/E30cm.stl"/>
+    <mesh name="human_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/ybot.stl"/>
+    <mesh name="human_mesh_reversed" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/ybotr.stl"/>
   </asset>
 
   <worldbody>
     <!-- Floor -->
-    <geom name="floor" type="plane" size="200 200 0.1" pos="0 0 0" material="chessboard_material"/>
+    <geom name="floor" type="plane" size="150 150 0.1" pos="0 0 0" material="chessboard_material"/>
     
     <!-- Lighting -->
     <!-- <light name="light1" pos="0 0 10" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.1 0.1 0.1" castshadow="true"/> -->
@@ -51,18 +51,18 @@
 
     <!-- Agent -->
     <body name="agent_body" pos="0 0 1">
-      <geom name="agent" type="mesh" mesh="robot_mesh" pos="0 0 -0.75"/>
+      <geom name="agent" type="mesh" mesh="robot_mesh" pos="0 0 -1"/>
       <joint name="slider_x" type="slide" axis="1 0 0"/>
       <joint name="slider_y" type="slide" axis="0 1 0"/>
       <joint name="hinge_z" type="hinge" axis="0 0 1"/>
       <!-- Arrow shaft -->
-      <geom name="arrow_shaft" type="box" size="0.5 0.1 0.01" pos="0 0 1.01" material="arrow_material"/>
+      <geom name="arrow_shaft" type="box" size="0.5 0.1 0.05" pos="0 0 0.5" material="arrow_material"/>
       <!-- Arrow head - two triangular shapes -->
-      <geom name="arrow_head1" type="box" size="0.2 0.1 0.01" pos="0.7 0.1 1.01" euler="0 0 -45" material="arrow_material"/>
-      <geom name="arrow_head2" type="box" size="0.2 0.1 0.01" pos="0.7 -0.1 1.01" euler="0 0 45" material="arrow_material"/>
+      <geom name="arrow_head1" type="box" size="0.15 0.05 0.05" pos="0.5 0.1 0.5" euler="0 0 -45" material="arrow_material"/>
+      <geom name="arrow_head2" type="box" size="0.15 0.05 0.05" pos="0.5 -0.1 0.5" euler="0 0 45" material="arrow_material"/>
     </body>
 
-    <geom name="sphere" type="sphere" size="1" pos="0 0 2" material="sphere_material"/>
+    <geom name="sphere" type="sphere" size="0.5" pos="0 0 2" material="sphere_material"/>
 
     <body name="room_mesh_body" pos="0 0 0">
       <geom name="room_geom" type="mesh" mesh="room_mesh" material="wall_material" />

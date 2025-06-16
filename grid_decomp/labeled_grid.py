@@ -173,7 +173,7 @@ class GridCell_operations:
         static_obstacles = []
 
         try:
-            with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt', 'r') as f:
+            with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/meshes.txt', 'r') as f:
                 lines = f.readlines()
 
             i = 0
@@ -208,7 +208,7 @@ class GridCell_operations:
                 i += 1
 
         except FileNotFoundError:
-            print("boxes_2d_corners.txt not found")
+            print("meshes.txt not found")
             return None
 
         return jnp.array(self.static_obstacles)

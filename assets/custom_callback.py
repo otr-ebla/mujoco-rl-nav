@@ -61,9 +61,11 @@ class RewardCallback(BaseCallback):
             if len(self.episode_rewards) > 0:
                 mean_reward = sum(self.episode_rewards) / len(self.episode_rewards)
                 mean_episode_length = sum(self.episode_lengths) / len(self.episode_lengths)
+                
+                # Initialize mean_episode_time_length with a default value
+                mean_episode_time_length = 0.0
                 if len(self.episode_time_lengths) > 0:
                     mean_episode_time_length = sum(self.episode_time_lengths) / len(self.episode_time_lengths)
-                    self.logger.record('metrics/mean_episode_time_length', mean_episode_time_length)
 
                 self.logger.record('metrics/mean_episode_reward', mean_reward)
                 self.logger.record('metrics/mean_episode_length', mean_episode_length)
@@ -86,4 +88,3 @@ class RewardCallback(BaseCallback):
             self.episode_time_lengths = []
 
         return True
-

@@ -13,14 +13,14 @@ import argparse
 import xml.etree.ElementTree as ET
 import os
 import torch
-from torch.utils.tensorboard import SummaryWriter
-from stable_baselines3.common.vec_env import VecNormalize
-
 from assets.custom_callback import RewardCallback
-
 from HAMRRLN import hamrrln
-from assets.custompolicy import TanhActorCriticPolicy
 from stable_baselines3.common.callbacks import BaseCallback
+from assets.custompolicy import TanhActorCriticPolicy
+from torch.utils.tensorboard import SummaryWriter
+
+import os
+os.environ['JAX_PLATFORMS'] = 'cpu'
 
 class PolicySaveCallback(BaseCallback):
     def __init__(self, save_freq, save_path, verbose=1):
@@ -38,38 +38,40 @@ class PolicySaveCallback(BaseCallback):
         return True
 
 
-def make_env(num_rays, model_path="assets/world.xml", training = True):
+
+def make_env(num_rays, model_path="assets/world.xml", training = True, n_humans = 5, render_mode=None, n_stacking = 20):
     def _init():
         env = hamrrln(
             num_rays=num_rays, 
-            render_mode="human", 
-            model_path=model_path,
+            model_path=model_path, 
             training=training,
-            #num_obst=args.num_obst
-            n_humans=5
+            n_humans = n_humans,
+            n_stacking=n_stacking,
             )
         return env
     return _init
 
 
-def train_agent(num_rays, model_path="assets/world.xml", num_envs=64, num_steps=1000000, run_id="training1", training=True, trainer="ppo"):
-    log_dir = f"./TENSORBOARD/{run_id}"
+from stable_baselines3.common.vec_env import VecNormalize
+
+def train_agent(num_rays, model_path="assets/world.xml", num_envs=16, num_steps=100000, run_id="training1", training=True, trainer="ppo", n_humans=5, n_stacking=10):
+    log_dir = "./TENSORBOARD/"
     os.makedirs(log_dir, exist_ok=True)
 
     if not training:
         env = hamrrln(
             num_rays=num_rays, 
-            render_mode="human", 
-            model_path=model_path,
+            model_path=model_path, 
             training=False,
-            #num_obst=args.num_obst
-            n_humans=5
-        )
+            n_humans = n_humans,
+            n_stacking=n_stacking,
+            )
     else:
         # Create vectorized environment
         env = SubprocVecEnv([make_env(num_rays, model_path, training=training) for _ in range(num_envs)])
         env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
+ 
         
     policy_kwargs = dict(
         net_arch=[128, 128],
@@ -160,26 +162,29 @@ def train_agent(num_rays, model_path="assets/world.xml", num_envs=64, num_steps=
 
     reward_callback = RewardCallback()
 
+
     callbacks = [checkpoint_callback, reward_callback]
     
     # Train the model
     print(f"Training PPO agent for {num_steps} steps...")
-    try:
-        model.learn(
-            total_timesteps=num_steps,
-            callback=callbacks,
-            tb_log_name=run_id  # This ensures logs go to the correct subdirectory
-        )
-    except Exception as e:
-        print(f"An error occurred during training: {e}")
-        env.close()
-        return
+    model.learn(
+        total_timesteps=num_steps,
+        callback=callbacks,
+        tb_log_name=run_id  # This ensures logs go to the correct subdirectory
+    )
+
     
     # Save the final model
-    model.save(f"TENSORBOARD/{run_id}")
-    env.save(f"{run_id}.pkl")
+    model.save(f"{run_id}")
+    env.save(os.path.join(log_dir, f"{run_id}.pkl"))
 
     env.close()
+
+
+
+
+
+
 
 
 
@@ -199,53 +204,66 @@ if __name__ == "__main__":
     parser.add_argument("--num_steps", type=int, default=10000000, help="Number of training steps.")
     parser.add_argument("--run_id", type=str, default="DEFAULT", help="Run ID for TensorBoard logging.")
     parser.add_argument("--trainer", type=str, default="PPO", help="Trainer to use (PPO, SAC, TD3, TQC).")
-    #parser.add_argument("--num_obst", type=int, default=51, help="Number of obstacles in the environment.")
+    parser.add_argument("--num_obst", type=int, default=51, help="Number of obstacles in the environment.")
     args = parser.parse_args()
     
     name = args.run_id
-    #args.run_id = os.path.join("./TENSORBOARD/", args.run_id)
 
     train = args.train
     if args.eval:
         train = False
 
     if train:
-        print("🎯 Starting training - rendering disabled")
         train_agent(args.num_rays, args.model_path, args.num_envs, args.num_steps, args.run_id, training=True, trainer=args.trainer)
     
     # Load the last trained model with the correct algorithm class
     if args.trainer == "PPO":
-        model = PPO.load(f"TENSORBOARD/{name}")
+        model = PPO.load(f"{name}")
     elif args.trainer == "SAC":
-        model = SAC.load(f"TENSORBOARD/{name}")
+        model = SAC.load(f"{name}")
     elif args.trainer == "TD3":
-        model = TD3.load(f"TENSORBOARD/{name}")
+        model = TD3.load(f"{name}")
     elif args.trainer == "TQC":
-        model = TQC.load(f"TENSORBOARD/{name}")
+        model = TQC.load(f"{name}")
     
-    print("🎬 Starting evaluation - rendering enabled")
     eval_env = DummyVecEnv([lambda: hamrrln(
-        #num_rays=args.num_rays, 
-        render_mode="human", 
-        #model_path=args.model_path,
-        training=False,
-        #num_obst=args.num_obst
-        n_humans=5
-    )])
+                                    num_rays=args.num_rays, 
+                                    model_path=args.model_path, 
+                                    training=False,
+                                    n_humans = 5,
+                                    n_stacking= 20,
+                            )])
 
     # Carica la normalizzazione su DummyVecEnv
-    if os.path.exists(f"{args.run_id}.pkl"):
-        eval_env = VecNormalize.load(f"{args.run_id}.pkl", eval_env)
+    if os.path.exists(os.path.join("./TENSORBOARD/", f"{args.run_id}.pkl")):
+        eval_env = VecNormalize.load(os.path.join("./TENSORBOARD/", f"{args.run_id}.pkl"), eval_env)
     else:
-        eval_env = VecNormalize.load("vecnormalize.pkl", eval_env)
-
+        eval_env = VecNormalize.load(os.path.join("./TENSORBOARD/", "vecnormalize.pkl"), eval_env)
     eval_env.training = False
     eval_env.norm_reward = False
     
     # Evaluate the trained agent
-    mean_reward, std_reward, linear_velocities, angular_velocities = evaluate_policy(model, eval_env, n_eval_episodes=200, deterministic=True, print_actions_means=True)
+    mean_reward, std_reward, linear_velocities, angular_velocities = evaluate_policy(model, eval_env, n_eval_episodes=20000000, deterministic=True, print_actions_means=True)
     print(f"Mean reward: {mean_reward}, Std reward: {std_reward}")
 
     eval_env.close()
 
-# export JAX_PLATFORM_NAME=cpu
+    # import matplotlib.pyplot as plt
+    
+    # linear_velocities = np.array(linear_velocities)
+    # angular_velocities = np.array(angular_velocities)
+
+    # print(len(linear_velocities))
+    # linear_velocities = 0.31*linear_velocities
+    # angular_velocities = 1.9*angular_velocities
+    
+    # plt.figure(figsize=(8, 6))
+    # plt.plot([0.2, 0.31], [1.9, 0.0], 'ro-', linewidth=2)
+    # plt.scatter(linear_velocities, angular_velocities, alpha=0.2)
+    # plt.xlabel("Linear Velocity")
+    # plt.ylabel("Angular Velocity")
+    # plt.title(f"2D Scatter Plot of Linear vs Angular Velocities with {len(linear_velocities)} points")
+    # plt.grid(True)
+    # plt.tight_layout()
+    # plt.savefig("velocity_scatter.png")
+    # plt.show()
