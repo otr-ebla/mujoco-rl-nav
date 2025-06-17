@@ -9,13 +9,13 @@ import time
 import random
 from functools import lru_cache
 from typing import Dict, List, Tuple, Optional, Any
-from collections import deque
 
 import logging
 from collections import deque
 from pynput import keyboard
 # Import scenarios efficiently
 from scenarios import scenario1, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8, scenario9, scenario10, scenario11, scenario12
+from no_humans_scenarios import scenario1_nh, scenario2_nh, scenario3_nh, scenario4_nh, scenario5_nh, scenario6_nh, scenario7_nh, scenario8_nh, scenario9_nh, scenario10_nh, scenario11_nh, scenario12_nh
 
 import jax.numpy as jnp
 from JHSFM.jhsfm.hsfm import step
@@ -29,10 +29,12 @@ os.environ['JAX_PLATFORMS'] = 'cpu'
 ROBOT_RADIUS = 0.2
 COLLISION_THRESHOLD = 0.4  # ROBOT_RADIUS * 2
 DISTANCE_SUCCESS_THRESHOLD = 0.5
-MAX_EPISODE_TIME = 200.0 # 100 s
+MAX_EPISODE_TIME = 60.0 # 60 s
 HUMANS_DT = 0.01
 N_STACKING = 10  # Default stacking size for observations
 ROBOT_DT = 0.25 # Robot control timestep in seconds
+MAX_LIN_VEL_ROBOT = 1.0 # da non confondere con il robot_dt che è il passo di controllo del robot
+PROGRESS_REWARD_SCALE = 0.03  # Scale for progress reward
 
 
 keyboard_active = False  # Set to False to disable keyboard control
@@ -86,7 +88,21 @@ class hamrrln(mobilerobotRL):
         self.human_parameters = get_standard_humans_parameters(self.n_humans)
         self.grid_cell_op = GridCell_operations(cell_size=4, world_size=320)
 
-
+        self.current_scenario_id = None
+        self.scenario_mapping = {
+            scenario1.scenario1: 1,
+            scenario2.scenario2: 2,
+            scenario3.scenario3: 3,
+            scenario4.scenario4: 4,
+            scenario5.scenario5: 5,
+            scenario6.scenario6: 6,
+            scenario7.scenario7: 7,
+            scenario8.scenario8: 8,
+            scenario9.scenario9: 9,
+            scenario10.scenario10: 10,
+            scenario11.scenario11: 11,
+            scenario12.scenario12: 12,
+        }
 
         listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         listener.start()
@@ -109,7 +125,7 @@ class hamrrln(mobilerobotRL):
         # Load scenarios once for better performance
         self.scenarios = [
             scenario1.scenario1, scenario2.scenario2, scenario3.scenario3, scenario4.scenario4,
-            scenario5.scenario5, scenario6.scenario6, scenario7.scenario7, scenario8.scenario8, 
+            scenario5.scenario5, scenario7.scenario7, scenario8.scenario8, 
             scenario9.scenario9, scenario10.scenario10, scenario11.scenario11, scenario12.scenario12,
         ]
 
@@ -166,7 +182,8 @@ class hamrrln(mobilerobotRL):
 
         self.step_time_measure = 0
         self.robot_action_period = 0.0
-        self.polar_stack = deque([np.zeros(2, dtype=np.float32)] * self.n_stacking, maxlen=self.n_stacking)
+        self.polar_stack = deque([np.zeros(2, dtype=np.float32).copy() for _ in range(self.n_stacking)], maxlen=self.n_stacking)
+
 
     
     def _initialize_state_variables(self):
@@ -366,6 +383,8 @@ class hamrrln(mobilerobotRL):
     def _load_random_scenario(self) -> Dict[str, float]:
         """Load a random scenario efficiently."""
         scenario_func = random.choice(self.scenarios)
+
+        self.current_scenario_id = self.scenario_mapping.get(scenario_func, 0)
         return scenario_func()
     
     def _set_robot_initial_state(self, scenario_data: Dict[str, float]):
@@ -373,7 +392,8 @@ class hamrrln(mobilerobotRL):
         self.data.qpos[0] = scenario_data["mob_robot_startposx"]
         self.data.qpos[1] = scenario_data["mob_robot_startposy"] 
         self.data.qpos[2] = scenario_data["mob_robot_start_orientation"]
-        self.data.qvel[:] = 0  # Reset velocities
+        self.data.qvel[:] = np.zeros_like(self.data.qvel)
+
     
     def _set_humans_initial_state(self, scenario_data: Dict[str, float]):
         """Set humans initial positions and goals efficiently."""
@@ -532,6 +552,7 @@ class hamrrln(mobilerobotRL):
             if sensor_id >= 0:
                 current_lidar[i] = round(self.data.sensordata[sensor_id], 2)
         
+        self.lidar_readings = np.zeros(self.num_rays, dtype=np.float32) 
         # Update lidar readings and stack
         self.lidar_readings[:] = current_lidar
         self._update_lidar_stack(current_lidar)
@@ -596,14 +617,15 @@ class hamrrln(mobilerobotRL):
             "episode_count": self.episode_count,
             "current_step": self.current_step,
             "stacked_observations_shape": (self.n_stacking, self.num_rays),
-            "total_observation_size": self.n_stacking * self.num_rays + self.n_stacking * 2  # lidar + polar data
+            "total_observation_size": self.n_stacking * self.num_rays + self.n_stacking * 2,  # lidar + polar data
+            "scenario_id": self.current_scenario_id,
         }
     
     def _apply_robot_action(self, action: np.ndarray):
         """Apply robot action using optimized kinematics."""
         if not keyboard_active:
 
-            max_lin_vel = 0.25 # Maximum linear velocity 0.25 m/s
+            max_lin_vel = MAX_LIN_VEL_ROBOT # Maximum linear velocity 0.25 m/s
 
             lin_vel = float(action[0])*max_lin_vel  # 0 to 1
             ang_vel = float(action[1])  # -1 to 1
@@ -740,12 +762,12 @@ class hamrrln(mobilerobotRL):
     
 
         # Distance-based reward
-        progress_reward = 0.03*(self.previous_distance - distance_to_target)
+        progress_reward = PROGRESS_REWARD_SCALE*(self.previous_distance - distance_to_target)
         reward += progress_reward
         self.previous_distance = distance_to_target
         
-        angle_reward = -0.01*abs(self.relative_angle)
-        reward += angle_reward
+        #angle_reward = -0.01*abs(self.relative_angle)
+        #reward += angle_reward
 
         #print(f"Progress reward: {progress_reward:.5f}, Angle reward: {angle_reward:.5f}")
 
@@ -755,8 +777,8 @@ class hamrrln(mobilerobotRL):
         #    print(f"Distance to target: {distance_to_target:.2f}, Angle: {self.relative_angle:.2f}")
         
         # Collision detection and penalty
-        collision_detected, rew_lasers = self._lasers_reward(reward)
-        reward += rew_lasers
+        collision_detected = self._lasers_reward(reward)
+        #reward += rew_lasers
         
         # Success check
         if distance_to_target < DISTANCE_SUCCESS_THRESHOLD:
@@ -765,6 +787,7 @@ class hamrrln(mobilerobotRL):
             reward += 200
             info["steps_taken"] = self.current_step
             info["episode_time_length"] = episode_time
+            info["episode_result"] = "success"
             if not self.training:
                 print(f"Target reached in {episode_time:.2f} seconds.")
                 pass
@@ -773,18 +796,19 @@ class hamrrln(mobilerobotRL):
         if collision_detected:
             self.last_episode_result = "collision"
             terminated = True
-            reward -= 20
+            reward += -10
             info["steps_taken"] = self.current_step
             info["episode_time_length"] = self.episode_time
+            info["episode_result"] = "collision"
             return reward, terminated, truncated
         
         # Timeout check
         if self.robot_action_counter*self.robot_dt > self.max_episode_time:
             self.last_episode_result = "timeout"
             truncated = True
-            reward -= 15
             info["steps_taken"] = self.current_step
             info["episode_time_length"] = self.episode_time
+            info["episode_result"] = "timeout"
             if not self.training:
                 print(f"Episode timeout after {self.episode_time:.2f} REAL seconds.")
                 pass
@@ -803,15 +827,16 @@ class hamrrln(mobilerobotRL):
         for i in range(0, len(self.lidar_readings)):
             reading = self.lidar_readings[i]
             
-            if reading < COLLISION_THRESHOLD and reading > self.robot_radius: #0.4
-                # Close to obstacle - apply penalty
-                base_reward -= 0.1
-            elif reading <= self.robot_radius:
+            # if reading < COLLISION_THRESHOLD and reading > self.robot_radius: #0.4
+            #     # Close to obstacle - apply penalty
+            #     base_reward -= 0.1
+            # elif 
+            if reading <= self.robot_radius:
                 # Collision detected
                 collision_detected = True
-                return collision_detected, base_reward
+                return collision_detected
         
-        return collision_detected, base_reward
+        return collision_detected
 
 
 
