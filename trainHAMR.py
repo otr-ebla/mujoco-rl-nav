@@ -8,7 +8,7 @@ from sb3_contrib import TQC
 
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv,VecNormalize 
 import argparse
 import xml.etree.ElementTree as ET
 import os
@@ -17,7 +17,8 @@ from assets.custom_callback import RewardCallback
 from HAMRRLN import hamrrln
 from stable_baselines3.common.callbacks import BaseCallback
 from assets.custompolicy import TanhActorCriticPolicy
-from torch.utils.tensorboard import SummaryWriter
+ 
+
 
 import os
 os.environ['JAX_PLATFORMS'] = 'cpu'
@@ -147,7 +148,6 @@ def make_env(num_rays, model_path="assets/world.xml", training = True, n_humans 
     return _init
 
 
-from stable_baselines3.common.vec_env import VecNormalize
 
 def train_agent(num_rays, model_path="assets/world.xml", num_envs=16, num_steps=100000, run_id="training1", training=True, trainer="ppo", n_humans=5, n_stacking=10):
     log_dir = "./TENSORBOARD/"
