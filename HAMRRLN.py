@@ -15,7 +15,7 @@ from collections import deque
 from pynput import keyboard
 # Import scenarios efficiently
 from scenarios import scenario1, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8, scenario9, scenario10, scenario11, scenario12
-from no_humans_scenarios import scenario1_nh, scenario2_nh, scenario3_nh, scenario4_nh, scenario5_nh, scenario6_nh, scenario7_nh, scenario8_nh, scenario9_nh, scenario10_nh, scenario11_nh, scenario12_nh
+from no_humans_scenariosS import scenario1_nh, scenario2_nh, scenario3_nh, scenario4_nh, scenario5_nh, scenario6_nh, scenario7_nh, scenario8_nh, scenario9_nh, scenario10_nh, scenario11_nh, scenario12_nh
 
 import jax.numpy as jnp
 from JHSFM.jhsfm.hsfm import step
@@ -29,11 +29,11 @@ os.environ['JAX_PLATFORMS'] = 'cpu'
 ROBOT_RADIUS = 0.2
 COLLISION_THRESHOLD = 0.4  # ROBOT_RADIUS * 2
 DISTANCE_SUCCESS_THRESHOLD = 0.5
-MAX_EPISODE_TIME = 60.0 # 60 s
+MAX_EPISODE_TIME = 60.0 # MAX_EPISODE_TIME s
 HUMANS_DT = 0.01
 N_STACKING = 10  # Default stacking size for observations
-ROBOT_DT = 0.25 # Robot control timestep in seconds
-MAX_LIN_VEL_ROBOT = 1.0 # da non confondere con il robot_dt che è il passo di controllo del robot
+ROBOT_DT = 0.50 # Robot control timestep in seconds
+MAX_LIN_VEL_ROBOT = 0.25     # da non confondere con il robot_dt che è il passo di controllo del robot
 PROGRESS_REWARD_SCALE = 0.03  # Scale for progress reward
 
 
@@ -128,6 +128,11 @@ class hamrrln(mobilerobotRL):
             scenario5.scenario5, scenario7.scenario7, scenario8.scenario8, 
             scenario9.scenario9, scenario10.scenario10, scenario11.scenario11, scenario12.scenario12,
         ]
+
+        #self.scenarios = [scenario1_nh.scenario1_nh, scenario2_nh.scenario2_nh, scenario3_nh.scenario3_nh,
+                        #   scenario4_nh.scenario4_nh, scenario5_nh.scenario5_nh, scenario6_nh.scenario6_nh,
+                        #   scenario7_nh.scenario7_nh, scenario8_nh.scenario8_nh, scenario9_nh.scenario9_nh,
+                        #   scenario10_nh.scenario10_nh, scenario11_nh.scenario11_nh, scenario12_nh.scenario12_nh]
 
         #self.scenarios = [scenario10.scenario10, scenario11.scenario11, scenario12.scenario12]
         
@@ -766,8 +771,8 @@ class hamrrln(mobilerobotRL):
         reward += progress_reward
         self.previous_distance = distance_to_target
         
-        #angle_reward = -0.01*abs(self.relative_angle)
-        #reward += angle_reward
+        angle_reward = -0.01*abs(self.relative_angle)
+        reward += angle_reward
 
         #print(f"Progress reward: {progress_reward:.5f}, Angle reward: {angle_reward:.5f}")
 
@@ -777,8 +782,8 @@ class hamrrln(mobilerobotRL):
         #    print(f"Distance to target: {distance_to_target:.2f}, Angle: {self.relative_angle:.2f}")
         
         # Collision detection and penalty
-        collision_detected = self._lasers_reward(reward)
-        #reward += rew_lasers
+        collision_detected, rew_lasers = self._lasers_reward(reward)
+        reward += rew_lasers
         
         # Success check
         if distance_to_target < DISTANCE_SUCCESS_THRESHOLD:
@@ -827,16 +832,15 @@ class hamrrln(mobilerobotRL):
         for i in range(0, len(self.lidar_readings)):
             reading = self.lidar_readings[i]
             
-            # if reading < COLLISION_THRESHOLD and reading > self.robot_radius: #0.4
-            #     # Close to obstacle - apply penalty
-            #     base_reward -= 0.1
-            # elif 
-            if reading <= self.robot_radius:
+            if reading < COLLISION_THRESHOLD and reading > self.robot_radius: #0.4
+                # Close to obstacle - apply penalty
+                base_reward -= 0.1
+            elif reading <= self.robot_radius:
                 # Collision detected
                 collision_detected = True
-                return collision_detected
+                return collision_detected, base_reward
         
-        return collision_detected
+        return collision_detected, base_reward
 
 
 
