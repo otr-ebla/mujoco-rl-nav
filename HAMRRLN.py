@@ -21,6 +21,7 @@ import jax.numpy as jnp
 from JHSFM.jhsfm.hsfm import step
 from JHSFM.jhsfm.utils import get_standard_humans_parameters
 from grid_decomp.labeled_grid import GridCell_operations
+from assets.collisondetector import CollisionDetector
 
 import os
 os.environ['JAX_PLATFORMS'] = 'cpu'
@@ -29,7 +30,7 @@ os.environ['JAX_PLATFORMS'] = 'cpu'
 ROBOT_RADIUS = 0.2
 COLLISION_THRESHOLD = 0.4  # ROBOT_RADIUS * 2
 DISTANCE_SUCCESS_THRESHOLD = 0.5
-MAX_EPISODE_TIME = 60.0 # MAX_EPISODE_TIME s
+MAX_EPISODE_TIME = 240.0 # MAX_EPISODE_TIME s
 HUMANS_DT = 0.01
 N_STACKING = 10  # Default stacking size for observations
 ROBOT_DT = 0.50 # Robot control timestep in seconds
@@ -80,6 +81,8 @@ class hamrrln(mobilerobotRL):
         
         self.humans_dt = HUMANS_DT
         self.max_episode_time = MAX_EPISODE_TIME
+
+        
         
         # Physics parameters
         self.robot_radius = ROBOT_RADIUS
@@ -138,6 +141,9 @@ class hamrrln(mobilerobotRL):
         
         # Initialize MuJoCo environment
         self._setup_mujoco()
+
+        human_names = [f"human{i+1}" for i in range(self.n_humans)]
+        self.collision_detector = CollisionDetector(self.model, self.data, robot_body_name="agent_body", human_body_names=human_names)
         self.robot_dt = ROBOT_DT
         
         # Setup viewer if needed
@@ -796,6 +802,19 @@ class hamrrln(mobilerobotRL):
             if not self.training:
                 print(f"Target reached in {episode_time:.2f} seconds.")
                 pass
+            return reward, terminated, truncated
+        
+        humans_collision_detected, _ = self.collision_detector.check_robot_human_collision_distance(
+            collision_threshold=COLLISION_THRESHOLD
+        )
+
+        if humans_collision_detected:
+            self.last_episode_result = "human_collision"
+            terminated = True
+            reward += -20  # optionally penalize more heavily
+            info["steps_taken"] = self.current_step
+            info["episode_time_length"] = self.episode_time
+            info["episode_result"] = "human_collision"
             return reward, terminated, truncated
 
         if collision_detected:
