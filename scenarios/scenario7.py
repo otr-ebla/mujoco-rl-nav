@@ -2,17 +2,22 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import gymnasium as gym 
 import mujoco
-import mujoco_viewer
-
+import mujoco.viewer
 # Scenario 7: robot deve girare tra le colonne e raggiungere il target mentre 3 umani sono nel mezzo
+
+
+# NNNNNOOOOOOO
 
 def scenario7():
     random_x = np.random.uniform(-4.5, 4.5)
     random_y = np.random.uniform(-4.5, 4.5)
     random_angle = np.random.uniform(-90, 90)
-    mob_robot_startposx = 68.56
+    rad_angle = np.deg2rad(random_angle)
+    mob_robot_startposx = 73.0
     mob_robot_startposy = -10.76 + random_y
-    mob_robot_start_orientation = 90 + random_angle
+
+    in_rad_90 = np.deg2rad(90)
+    mob_robot_start_orientation = in_rad_90 + rad_angle
     target_robot_x = 73.0
     target_robot_y = 9.08 + random_y
 
@@ -55,6 +60,7 @@ def scenario7():
         "mob_robot_start_orientation": mob_robot_start_orientation,
         "target_robot_x": target_robot_x,
         "target_robot_y": target_robot_y,
+        "rad_angle": rad_angle,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,

@@ -11,55 +11,7 @@ import xml.etree.ElementTree as ET
 class mobilerobotRL(gym.Env):
     def __init__(self, num_rays = 108, training = True, log_dir="TENSORBOARD", model_path = "assets/world.xml") -> None:
         super().__init__()  
-        # self.training = training
-        # self.num_rays = num_rays
-        # self.max_episode_steps = 1000
-        # self.current_step = 0
-        # self.previous_distance = 100
-        # self.episode_return = 0
-        # self.mean_episode_return = 0
-        # self.episode_counter = 0
-        # self.success_counter = 0
-        # self.collision_counter = 0
-        # self.timeout_counter = 0
-        # self.last_episode_result = None
-        # self.episode_time_length = 0
-        # self.episode_time_begin = 0
-        # self.render_mode = None
-        # self.lidar_readings = None  
-        # self.success_rate = 0
-        # self.collision_rate = 0
-        # self.timeout_rate = 0
-        # self.robot_relative_azimuth = 0
-        # self.model_path = model_path
-        # self.training_mode = training
-
-        # # robot_pos, target_pos, robot_rot_matrix, lidar_readings
-        # self.robot_pos = np.zeros(3)
-        # self.target_pos = np.zeros(3)
-        # self.robot_rot_matrix = np.eye(3)
-        # self.lidar_readings = np.zeros(self.num_rays)
-
-        # self.episode_count = 0
-        # self.success_count = 0
-        # self.collision_count = 0
-        # self.timeout_count = 0
-
-        # # Mobile Robot action space
-        # self.action_space = gym.spaces.Box(
-        #     low = np.array([0, -1.0]),
-        #     high = np.array([1.0, 1.0]),
-        #     shape = (2, ),
-        #     dtype = np.float32
-        # )
-
-        # # Mobile Robot observation space
-        # self.observation_space = gym.spaces.Box(
-        #     low = np.array([0.0]*num_rays+[0.0, -np.pi]),
-        #     high = np.array([30.0]*num_rays+[0.0, np.pi]),
-        #     shape = (num_rays + 2, ),
-        #     dtype = np.float32
-        # )
+        
 
         self.xml_model = self.load_and_modify_xml_model()
         self.model = mujoco.MjModel.from_xml_string(self.xml_model) 
@@ -78,12 +30,14 @@ class mobilerobotRL(gym.Env):
         self.reset()
 
     def load_and_modify_xml_model(self):
+        """Load and modify the XML model to include LiDAR sensors."""
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"Model file {self.model_path} not found.")
         
         tree = ET.parse(self.model_path)
         root = tree.getroot()
 
+        # Find the robot body
         mobile_robot_body = None
         for body in root.findall('.//body'):
             if body.get("name") == "agent_body":
@@ -93,38 +47,43 @@ class mobilerobotRL(gym.Env):
         if mobile_robot_body is None:
             raise ValueError("Mobile robot body not found in the XML model.")
         
-        sensor = None
-        for s in root.findall('.//sensor'):
-            sensor = s
-            break
+        # Find or create the sensor tag
+        sensor_tag = root.find('.//sensor')
+        if sensor_tag is None:
+            sensor_tag = ET.SubElement(root, 'sensor')
 
-        if sensor is None:
-            raise ValueError("Sensor not found in the XML model.")
-        
-        # Add lidar rangefinder sensor to the mobile robot body
+        # Clear any existing rangefinders (optional)
+        for rf in sensor_tag.findall('rangefinder'):
+            sensor_tag.remove(rf)
+
+        # Add LiDAR sites and rangefinders
         for i in range(self.num_rays):
-            angle = (i / self.num_rays) * 2 * np.pi
+            angle = (i / self.num_rays) * 2 * np.pi  # 0 to 2π
+            angle = (angle + np.pi) % (2 * np.pi) - np.pi  # Normalize to [-π, π]
 
-            #angle = (-np.pi / self.num_rays) * i + np.pi / 2  
-            angle = (angle + np.pi) % (2 * np.pi) - np.pi  # Normalize to [-pi, pi]
-
-            cos_angle = np.cos(angle)
-            sin_angle = np.sin(angle)
-
+            # Create sensor site (positioned 0.3m from center to avoid self-collisions)
             site = ET.SubElement(mobile_robot_body, 'site')
             site.set('name', f"lidar_site_{i}")
-            site.set('pos', f"{0.0} {0.0} -0.7")
-            site.set('size', "0.05")
-            site.set('rgba', "1 0 0 1")
-            site.set("zaxis", f"{cos_angle} {sin_angle} 0")
+            site.set('pos', f"{0.3 * np.cos(angle)} {0.3 * np.sin(angle)} 0")  # 30cm from center
+            site.set('size', "0.01")  # Visual size
+            site.set('rgba', "1 0 0 0.5")  # Semi-transparent red
+            site.set('zaxis', f"{np.cos(angle)} {np.sin(angle)} 0")  # Pointing direction
 
-            rangefinder = ET.Element("rangefinder")
-            rangefinder.set("name", f"lidar_{i}")
-            rangefinder.set("site", f"lidar_site_{i}")
-            sensor.append(rangefinder)
-
-        return ET.tostring(root, encoding='unicode')
+            # Create rangefinder sensor
+            rf = ET.SubElement(sensor_tag, 'rangefinder')
+            rf.set('name', f"lidar_{i}")
+            rf.set('site', f"lidar_site_{i}")
     
+
+        # Save the modified XML for debugging
+        xml_str = ET.tostring(root, encoding='unicode')
+        # debug_xml_path = "debug_modified_world.xml"
+        # with open(debug_xml_path, 'w') as f:
+        #     f.write(xml_str)
+        # print(f"Saved modified XML to: {debug_xml_path}")
+
+        return xml_str
+        
     def _setup_viewer(self):
         self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
         self.viewer.cam.distance = 25.0

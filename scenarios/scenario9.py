@@ -1,33 +1,32 @@
 import numpy as np
-import xml.etree.ElementTree as ET
-import gymnasium as gym 
-import mujoco
-import mujoco_viewer
 
-# Scenario 8: Infondo all'ambiente attraversa la porta, 3 umani nel mezzo
+# Scenario 9: Stanza all'inizio a sinistra
 
 def scenario9():
 
-    random_x = np.random.uniform(-4.5, 4.5)
+    random_x = np.random.uniform(0, 6)
     random_y = np.random.uniform(-4.5, 4.5)
-    random_angle = np.random.uniform(-90, 90)
+
+    random_angle = np.random.uniform(-45, 45)
+    rad_angle = np.deg2rad(random_angle)
+
     mob_robot_startposx = 4.38
     mob_robot_startposy = 14.0
-    mob_robot_start_orientation = 0 + random_angle
-    target_robot_x = 11
-    target_robot_y = 14.73
+    mob_robot_start_orientation = 0 + rad_angle
+    target_robot_x = 11+random_x
+    target_robot_y = 16.73
 
-    human1x = 95.35
-    human1y = 0
-    start_orientation_human1 = 90
-    targethuman1x = 95.0
-    targethuman1y = 19.0
+    human1x = 90.37
+    human1y = 21.2
+    start_orientation_human1 = -90
+    targethuman1x = 9.37
+    targethuman1y = 10.15
 
-    human2x = 100.0
-    human2y = 2.0
-    start_orientation_human2 = 180
-    targethuman2x = 92.0
-    targethuman2y = 2.0
+    human2x = 110.82
+    human2y = 11.4
+    start_orientation_human2 = 90
+    targethuman2x = 11.82
+    targethuman2y = 20.9
 
     human3x = 92.12
     human3y = 11
@@ -56,6 +55,7 @@ def scenario9():
         "mob_robot_start_orientation": mob_robot_start_orientation,
         "target_robot_x": target_robot_x,
         "target_robot_y": target_robot_y,
+        "rad_angle": rad_angle,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,

@@ -2,18 +2,25 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import gymnasium as gym 
 import mujoco
-import mujoco_viewer
-
+import mujoco.viewer
 # Scenario 8: Infondo all'ambiente attraversa la porta, 3 umani nel mezzo
+
+
+
+# NNNNNOOOOOOO
 
 def scenario8():
 
     random_x = np.random.uniform(-4.5, 4.5)
     random_y = np.random.uniform(-4.5, 4.5)
-    random_angle = np.random.uniform(-90, 90)
+    random_angle = np.random.uniform(-40, 40)
+    rad_angle = np.deg2rad(random_angle)
     mob_robot_startposx = 98.06
     mob_robot_startposy = 12.9
-    mob_robot_start_orientation = 180 + random_angle
+
+    in_rad_180 = np.deg2rad(180)
+    mob_robot_start_orientation = in_rad_180 + rad_angle
+    
     target_robot_x = 94.68
     target_robot_y = -8.4+random_y
 
@@ -56,6 +63,7 @@ def scenario8():
         "mob_robot_start_orientation": mob_robot_start_orientation,
         "target_robot_x": target_robot_x,
         "target_robot_y": target_robot_y,
+        "rad_angle": rad_angle,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mujoco model="indoor_environment">
-  <option gravity="0 0 -9.81" timestep="0.01" />
+  <option gravity="0 0 -9.81" />
   <asset>
     <!-- Texture scacchiera blu chiaro e blu scuro -->
     <texture name="chessboard" type="2d" builtin="checker" rgb1="1 1 1" rgb2="0.5 0.5 0.5" width="100" height="100"/>
@@ -42,7 +42,8 @@
 
   <worldbody>
     <!-- Floor -->
-    <geom name="floor" type="plane" size="150 150 0.1" pos="0 0 0" material="chessboard_material"/>
+    <light diffuse=".5 .5 .5" pos = "0 0 5" dir="0 0 -1" castshadow="true"/>
+    <geom type="plane" size="150 150 0.1" material="chessboard_material"/>
     
     <!-- Lighting -->
     <!-- <light name="light1" pos="0 0 10" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.1 0.1 0.1" castshadow="true"/> -->

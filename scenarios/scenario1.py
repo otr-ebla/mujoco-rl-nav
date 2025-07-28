@@ -2,52 +2,60 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import gymnasium as gym 
 import mujoco
-import mujoco_viewer
+import mujoco.viewer
 
 # Scenario 1: Il robot attraversa il corridoio centrale iniziale e raggiunge il target al fondo davanti alla parete
 #             Gli umani si incrociano lì davanti
 
 def scenario1():
     delta_random = 3
+    delta_target_random_y = np.random.uniform(-8, 8)
+    delta_target_random_x = np.random.uniform(-3, 0)
+
+
     random_x = np.random.uniform(-delta_random, delta_random)
     random_y = np.random.uniform(-delta_random, delta_random)
-    random_angle = np.random.uniform(-90, 90)
+    random_angle = np.random.uniform(-45, 45)
+    rad_angle = np.deg2rad(random_angle)
     mob_robot_startposx = 16.85 + random_x
-    mob_robot_startposy = 0 + random_y
-    mob_robot_start_orientation = 0 + random_angle
+    mob_robot_startposy = 0
+
+    mob_robot_start_orientation = 0 + rad_angle
+    
+    target_robot_x = 32.8 + delta_target_random_x
+    target_robot_y = 0.0 + delta_target_random_y
     
     human1x = 27.43 + random_x
     human1y = -8.7 + random_y
     start_orientation_human1 = 0.0
     targethuman1x = 27.43
-    targethuman1y = 7.63
+    targethuman1y = 7.63 + random_y
 
     human2x = 21.67
-    human2y = -9
+    human2y = -9 + random_y
     start_orientation_human2 = -20
     targethuman2x = 32
-    targethuman2y = 6.74
+    targethuman2y = 6.74 + random_y
 
     human3x = 23
-    human3y = 6.74
+    human3y = 6.74 + random_y
     start_orientation_human3 = -150
     targethuman3x = 32.4
-    targethuman3y = -6.8
+    targethuman3y = -6.8 + random_y
 
     human4x = 32.3
-    human4y = -2.6
+    human4y = -2.6 + random_y
     start_orientation_human4 = 90.0
     targethuman4x = 16.26
-    targethuman4y = -2.6    
+    targethuman4y = -2.6 + random_y
 
-    human5x = 16.26
+    human5x = 16.26 + random_x
     human5y = 2.77
     start_orientation_human5 = -90.0
     targethuman5x = 29.45 + random_x
     targethuman5y = 2.77 + random_y
 
-    target_robot_x = 32.8
-    target_robot_y = 0.0 + random_y
+    
 
     # return data
     return {
@@ -56,6 +64,7 @@ def scenario1():
         "mob_robot_start_orientation": mob_robot_start_orientation,
         "target_robot_x": target_robot_x,
         "target_robot_y": target_robot_y,
+        "rad_angle": rad_angle,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,

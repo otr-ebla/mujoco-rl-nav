@@ -2,19 +2,21 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import gymnasium as gym 
 import mujoco
-import mujoco_viewer
-
+import mujoco.viewer
 # Scenario 12: uguale a 10 solo gira a sinistra invece che a destra
 
 def scenario12():
     random_n = 1.7
     random_x = np.random.uniform(-random_n, random_n)
     random_y = np.random.uniform(-random_n, random_n)
-    random_angle = np.random.uniform(-90, 90)
+    random_angle = np.random.uniform(-45, 45)
+
+    rad_angle = np.deg2rad(random_angle)
+
     mob_robot_startposx = 10.68+random_x
     mob_robot_startposy = -21.71+random_y
-    mob_robot_start_orientation = 0 + random_angle
-    target_robot_x = 4.05+random_x
+    mob_robot_start_orientation = 0 + rad_angle
+    target_robot_x = 6.05+random_x
     target_robot_y = -14.73+random_y
 
     human1x = 95.35
@@ -56,6 +58,7 @@ def scenario12():
         "mob_robot_start_orientation": mob_robot_start_orientation,
         "target_robot_x": target_robot_x,
         "target_robot_y": target_robot_y,
+        "rad_angle": rad_angle,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,

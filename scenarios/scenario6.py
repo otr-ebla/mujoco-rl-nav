@@ -2,46 +2,51 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import gymnasium as gym 
 import mujoco
-import mujoco_viewer
-
+import mujoco.viewer
 # Scenario 6: il robot deve girare attorno al tavolo centrale
 
+# IMPOSSIBILE
+
 def scenario6():
-    random_x = np.random.uniform(-4.5, 4.5)
-    random_y = np.random.uniform(-4.5, 4.5)
-    random_angle = np.random.uniform(-90, 90)
-    mob_robot_startposx = 56 + random_x
-    mob_robot_startposy = -10
-    mob_robot_start_orientation = 90 + random_angle
-    target_robot_x = 56.08 + random_x
-    target_robot_y = 11.8
+    rand_dim = 2.0
+    random_x = np.random.uniform(-rand_dim, rand_dim)
+    random_y = np.random.uniform(-rand_dim, rand_dim)
+    random_angle = np.random.uniform(-60, 60)
+    rad_angle = np.deg2rad(random_angle)
+    mob_robot_startposx = 55.16 + random_x
+    mob_robot_startposy = 16.67
 
-    human1x = 48.68
-    human1y = -3.6
+    in_rad_90 = np.deg2rad(-90)
+    mob_robot_start_orientation = in_rad_90 + rad_angle #-90
+    target_robot_x = 55.33 + random_x
+    target_robot_y = 6.64
+
+    human1x = 48.57 + random_x
+    human1y = 9.2 + random_y
     start_orientation_human1 = 0
-    targethuman1x = 63.27
-    targethuman1y = -3.6
+    targethuman1x = 60.55 + random_x
+    targethuman1y = 10.2 + random_y
 
-    human2x = 63.26
-    human2y = 5.2
+    human2x = 3
+    human2y = 3
     start_orientation_human2 = 180
-    targethuman2x = 48.37
-    targethuman2y = 5.2
+    targethuman2x = 0
+    targethuman2y = 0
 
-    human3x = 63.05
-    human3y = -4.7 
+    human3x = 2
+    human3y =  2
     start_orientation_human3 = 90
-    targethuman3x = 63.05
-    targethuman3y = 5.0
+    targethuman3x = 0
+    targethuman3y = 0
 
-    human4x = 47.3
-    human4y = 5.0
+    human4x = 1
+    human4y = 1
     start_orientation_human4 = -90
     targethuman4x = 47.3
     targethuman4y = -4.08
 
-    human5x = 0.0
-    human5y = 0.0
+    human5x = 4
+    human5y = 4
     start_orientation_human5 = 180.0
     targethuman5x = 0.0
     targethuman5y = 0.0
@@ -55,6 +60,7 @@ def scenario6():
         "mob_robot_start_orientation": mob_robot_start_orientation,
         "target_robot_x": target_robot_x,
         "target_robot_y": target_robot_y,
+        "rad_angle": rad_angle,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,

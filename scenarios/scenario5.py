@@ -2,17 +2,23 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import gymnasium as gym 
 import mujoco
-import mujoco_viewer
-
+import mujoco.viewer
 # Scenario5: il robot entra nella prima porta a destra centrale e deve arrivare a attraversarne un'altra con dentro il target, 3 umani sono di mezzo
+
+# iIMPOSSIBILE!
+
 
 def scenario5():
     random_x = np.random.uniform(-4.5, 4.5)
     random_y = np.random.uniform(-4.5, 4.5)
-    random_angle = np.random.uniform(-90, 90)
+    random_angle = np.random.uniform(-40, 40)
+    rad_angle = np.deg2rad(random_angle)
     mob_robot_startposx = 40.4
     mob_robot_startposy = -19 
-    mob_robot_start_orientation = 90.0 + random_angle
+
+    in_rad_90 = np.deg2rad(90)
+    mob_robot_start_orientation = in_rad_90 + rad_angle
+    
     target_robot_x = 47.0 
     target_robot_y = 0 
 
@@ -55,6 +61,7 @@ def scenario5():
         "mob_robot_start_orientation": mob_robot_start_orientation,
         "target_robot_x": target_robot_x,
         "target_robot_y": target_robot_y,
+        "rad_angle": rad_angle,
         "human1x": human1x,
         "human1y": human1y,
         "start_orientation_human1": start_orientation_human1,
