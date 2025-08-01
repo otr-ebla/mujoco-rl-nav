@@ -36,7 +36,7 @@ DISTANCE_SUCCESS_THRESHOLD = 0.5
 
 #NUM_RAYS = 108  # Number of lidar rays
 
-MAX_EPISODE_TIME = 120 # MAX_EPISODE_TIME s
+MAX_EPISODE_TIME = 50 # MAX_EPISODE_TIME s
 
 #N_STACKING = 10  # Default stacking size for observations
 
@@ -82,7 +82,7 @@ class hamrrln(mobilerobotRL):
         self.num_rays = num_rays
         self.n_humans = n_humans
         self.training = training
-        self.render_mode = render_mode if training is False else None
+        self.render_mode = render_mode 
         self.model_path = model_path
         self.n_stacking = n_stacking  # Number of observations to stack
         self.enable_stacking = enable_stacking  # Enable or disable observation stacking
@@ -158,11 +158,16 @@ class hamrrln(mobilerobotRL):
 
         # Testing scenarios for IL
         self.scenarios = [
-            scenario1_easy.scenario1_easy,
+            scenario1.scenario1, # uguale a scenario1 ma con target meno random
             scenario4.scenario4, # Corridoio
             scenario9.scenario9, # Scenario con ostacoli    
             scenario12.scenario12, # Scenario con ostacoli e robot
-            scenario1_nohumans.scenario1_nohumans, # Scenario senza umani
+            scenario1.scenario1, # Scenario senza umani
+            scenario11.scenario11, # Scenario con ostacoli e robot
+            scenario7.scenario7, # Scenario con robot che gira tra le colonne
+            scenario5.scenario5, # Scenario con robot che gira tra le colonne
+            scenario6.scenario6, # Scenario con robot che gira tra le colonne
+            scenario8.scenario8, # Scenario con robot che attraversa la porta con 3 umani nel mezzo
         ]
         
         self._setup_mujoco()
@@ -636,7 +641,7 @@ class hamrrln(mobilerobotRL):
 
         assert action.shape == (2,), f"Expected action shape (2,), got {action.shape}"
 
-        if not self.training:
+        if not self.training: # in testing
             # Enforce real-time stepping in evaluation mode
             current_time = time.time()
             if self.last_step_real_time > 0:
@@ -713,18 +718,11 @@ class hamrrln(mobilerobotRL):
         lidar_stack = self._get_stacked_lidar_obs()  # shape: (n_stacking * num_rays,)
 
         # Final obs: [goal info] + [distances] + [angles] + [lidar]
-        # Final obs: [goal info] + [distances] + [angles] + [lidar]
         observation = np.concatenate([
             stacked_distances,
             stacked_angles,
             lidar_stack,
-        ]).astype(np.float32)
-
-        # observation = np.concatenate([
-        #     np.array([current_target_distance]),
-        #     np.array([current_relative_angle]),
-        #     lidar_stack,
-        # ]).astype(np.float32)
+        ]).astype(np.float32)     
 
         return observation
 

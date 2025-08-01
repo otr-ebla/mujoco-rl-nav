@@ -22,7 +22,7 @@ def scenario8():
     mob_robot_start_orientation = in_rad_180 + rad_angle
     
     target_robot_x = 94.68
-    target_robot_y = -8.4+random_y
+    target_robot_y = -3.4+random_y
 
     human1x = 95.35
     human1y = 0

@@ -348,6 +348,7 @@ policy = ActorCriticPolicy(
     action_space=act_space,
     lr_schedule=lambda _: 1e-4,
     **policy_kwargs,
+    # log_std_init=0.0,  # Initial log std = 0 -> std = 1
 )
 
 
@@ -575,7 +576,7 @@ checkpoint = torch.load(os.path.join(save_dir, "best_policy.pt"))
 
 # Wrap dummy env with VecNormalize
 dummy_env = DummyEnv(obs_space, act_space)
-vec_norm_env = VecNormalize(DummyVecEnv([lambda: dummy_env]), norm_obs=True, norm_reward=False)
+vec_norm_env = VecNormalize(DummyVecEnv([lambda: dummy_env]), norm_obs=False, norm_reward=False)
 vec_norm_env.training = False
 
 # Reconstruct SB3 model (standard MLP architecture)

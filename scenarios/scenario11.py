@@ -6,9 +6,9 @@ import mujoco.viewer
 # Scenario11: simile a scenario5 il robot deve entrare dentro una porta senza umani nelle vicinanze
 
 def scenario11():
-    random_x = np.random.uniform(-4.5, 4.5)
-    random_y = np.random.uniform(-4.5, 4.5)
-    random_angle = np.random.uniform(-30, 30)
+    random_x = np.random.uniform(-3.5, 3.5)
+    random_y = np.random.uniform(-2.5, 2.5)
+    random_angle = np.random.uniform(-35, 35)
     rad_angle = np.deg2rad(random_angle)    
     mob_robot_startposx = 40.4 + random_x
     mob_robot_startposy = -19
@@ -16,7 +16,7 @@ def scenario11():
     in_rad_90 = np.deg2rad(90.0)
     mob_robot_start_orientation = in_rad_90 + rad_angle
     
-    target_robot_x = 39.6 + random_y # randomy per renderlo diverso da randomx
+    target_robot_x = 39.6 + random_x # randomy per renderlo diverso da randomx
     target_robot_y = -11.78
 
     human1x = 4

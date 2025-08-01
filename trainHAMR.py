@@ -3,7 +3,7 @@ import math
 import time
 import gymnasium as gym
 from gymnasium import spaces
-from stable_baselines3 import PPO, SAC, TD3
+from stable_baselines3 import PPO, SAC, TD3, A2C
 from sb3_contrib import TQC
 
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
@@ -21,7 +21,7 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 
 from IL_HAMRRLN import NUM_RAYS, N_STACKING
 import logging
-from assets.train_classes import ScenarioSuccessCallback, PolicySaveCallback
+from assets.train_classes import ScenarioSuccessCallback, PolicySaveCallback, RenderCallback
 
 import os
 os.environ['JAX_PLATFORMS'] = 'cpu'
@@ -82,7 +82,9 @@ def train_agent(num_rays,
                 trainer="ppo",  
                 stacking=True,
                 n_stacking=10,
-                cl_resume = False):
+                cl_resume = False,
+                bc_policy_path="bc_policy/",
+                render_training=False):
     
     n_humans = N_HUMANS
     
@@ -100,7 +102,22 @@ def train_agent(num_rays,
             )
     else:
         # Create vectorized environment
-        env = SubprocVecEnv([make_env(num_rays, model_path, training=training) for _ in range(num_envs)])
+        if render_training and num_envs == 1:
+            env = DummyVecEnv([ lambda: hamrrln(
+                num_rays=num_rays,
+                model_path=model_path,
+                training=training,
+                n_humans=n_humans,
+                n_stacking=n_stacking,
+                enable_stacking=stacking,
+                render_mode="human",  # For rendering during training
+                )])
+
+
+
+        # STANDARD RL TRAINING ENVS
+        else:        # Create multiple parallel environments
+            env = SubprocVecEnv([make_env(num_rays, model_path, training=training) for _ in range(num_envs)])
         env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
  
@@ -111,27 +128,132 @@ def train_agent(num_rays,
     )
     trainer_name = None
     
+    # --- Curriculum Learning Resume ---
+
     if cl_resume:
         print("Resuming training with Curriculum Learning...")
-        if trainer == "PPO":
-            model = PPO.load(f"{run_id}", env=env)
-        elif trainer == "SAC":
-            model = SAC.load(f"{run_id}", env=env)
-        elif trainer == "TD3":
-            model = TD3.load(f"{run_id}", env=env)
-        elif trainer == "TQC":
-            model = TQC.load(f"{run_id}", env=env)
-        else:   
-            raise ValueError(f"Unsupported trainer: {trainer}. Choose from PPO, SAC, TD3, or TQC.")
-        
-        normalize_path = os.path.join(log_dir, f"{run_id}.pkl")
-        if os.path.exists(normalize_path):
-            env = VecNormalize.load(normalize_path, env)
-            print(f"✅ Loaded normalization parameters from {normalize_path}")
-        else:
-            print(f"⚠️ Normalization file {normalize_path} not found, using default normalization")
 
+        pre_trained_path = os.path.join(log_dir, f"{run_id}.zip")
+
+        if os.path.exists(pre_trained_path):
+            print(f"✅ Loading pre-trained model from {pre_trained_path}")
+            if trainer == "PPO":
+                model = PPO.load(pre_trained_path, env=env)
+            elif trainer == "SAC":
+                model = SAC.load(f"{pre_trained_path}", env=env)
+            elif trainer == "TD3":
+                model = TD3.load(f"{pre_trained_path}", env=env)
+            elif trainer == "TQC":
+                model = TQC.load(f"{pre_trained_path}", env=env)
+            else:   
+                raise ValueError(f"Unsupported trainer: {trainer}. Choose from PPO, SAC, TD3, or TQC.")
+            
+            normalize_path = os.path.join(log_dir, f"{pre_trained_path}.pkl")
+            if os.path.exists(normalize_path):
+                env = VecNormalize.load(normalize_path, env)
+                print(f"✅ Loaded normalization parameters from {normalize_path}")
+            else:
+                print(f"⚠️ Normalization file {normalize_path} not found, using default normalization")
+        else:
+            # BC CASE
+            print(f"⚠️ No model named {pre_trained_path} found, loading BC policy from {bc_policy_path}/best_policy.pt")
+            checkpoint = torch.load(f"{bc_policy_path}/best_policy.pt", map_location="cpu", weights_only=False)
+            
+            
+
+
+            if trainer == "PPO":
+                policy_kwargs = dict(
+                    net_arch=[128, 128],
+                    log_std_init=-2.0,
+                )
+                model = PPO(
+                    policy="MlpPolicy",
+                    env=env,
+                    policy_kwargs=policy_kwargs,
+                    verbose=1,
+                    device="cpu"
+                )
+                model.policy.load_state_dict(checkpoint['policy_state_dict'], strict=False)
+                print("✅ Loaded BC policy successfully into PPO model.")
+            elif trainer == "SAC":
+                policy_kwargs = dict(
+                    net_arch=[128, 128],
+                    log_std_init=-2.0,
+                )
+                model = SAC(
+                    policy="MlpPolicy",
+                    env=env,
+                    verbose=1,
+                    policy_kwargs=policy_kwargs,
+                    device="cpu"
+                )
+                model.policy.load_state_dict(checkpoint['policy_state_dict'], strict=False)
+                print("✅ Loaded BC policy successfully into SAC model.")
+            elif trainer == "TD3":
+                policy_kwargs = dict(
+                    net_arch=[128, 128],
+                    log_std_init=-2.0,
+                )
+                model = TD3(
+                    policy="MlpPolicy",
+                    env=env,
+                    verbose=1,
+                    policy_kwargs=policy_kwargs,
+                    device="cpu"
+                )
+                model.policy.load_state_dict(checkpoint['policy_state_dict'], strict=False)
+                print("✅ Loaded BC policy successfully into TD3 model.")
+            elif trainer == "TQC":
+                policy_kwargs = dict(
+                    net_arch=(dict(pi=[128, 128], qf=[128, 128])),
+                    log_std_init=-2.0,
+                    activation_fn=torch.nn.modules.activation.Tanh,
+                
+                )
+                model = TQC(
+                    policy="MlpPolicy",
+                    env=env,
+                    verbose=1,                         # turn on console logs
+                    tensorboard_log=log_dir,           # keep TB logging consistent
+                    device="cuda" if torch.cuda.is_available() else "cpu",
+                    learning_rate=0.0001,
+                    batch_size=1024,
+                    gamma=0.98,
+                    tau=0.005,
+                    ent_coef="auto_0.01",
+                    policy_kwargs=policy_kwargs,
+                )
+                checkpoint['policy_state_dict']['actor.latent_pi.0.weight'] = checkpoint['policy_state_dict']['mlp_extractor.policy_net.0.weight']
+                checkpoint['policy_state_dict']['actor.latent_pi.0.bias'] = checkpoint['policy_state_dict']['mlp_extractor.policy_net.0.bias']
+                checkpoint['policy_state_dict']['actor.latent_pi.2.weight'] = checkpoint['policy_state_dict']['mlp_extractor.policy_net.2.weight']
+                checkpoint['policy_state_dict']['actor.latent_pi.2.bias'] = checkpoint['policy_state_dict']['mlp_extractor.policy_net.2.bias']
+                checkpoint['policy_state_dict']['actor.mu.weight'] = checkpoint['policy_state_dict']['action_net.weight']
+                checkpoint['policy_state_dict']['actor.mu.bias'] = checkpoint['policy_state_dict']['action_net.bias']
+                #print(model.policy.load_state_dict(checkpoint['policy_state_dict'], strict=False))
+                model.policy._squash_output = False
+                print("✅ Loaded BC policy successfully into TQC model.")
+
+            #print("\n\n\n\n", model.policy.__dict__, "\n\n\n\n")
+            # Evaluate policy for some steps just to check if it works, with rendering
+            
         
+            normalize_path = os.path.join(bc_policy_path, f"vec_normalize.pkl")
+            if os.path.exists(normalize_path):
+                env = VecNormalize.load(normalize_path, env)
+                print(f"✅ Loaded normalization parameters from {normalize_path}")
+            else:
+                print(f"⚠️ Normalization file {normalize_path} not found, using default normalization")
+                env = VecNormalize(env, norm_obs=False, norm_reward=False)
+
+            trainer_name = trainer.upper()   # e.g. "TQC"
+            if trainer_name is not None:
+                print(f"Training {trainer_name} agent with Curriculum Learning for {num_steps} steps...")
+
+   
+
+    # --- Standard RL Training Setup ---
+
     else:
         if trainer == "PPO" or trainer == "ppo":
             # Create PPO model with built-in logging
@@ -153,6 +275,7 @@ def train_agent(num_rays,
                 verbose=1,
             )
             trainer_name = "PPO"
+            
         elif trainer == "SAC":
             model = SAC(
                 "MlpPolicy",
@@ -172,6 +295,7 @@ def train_agent(num_rays,
                 policy_kwargs=policy_kwargs
             )
             trainer_name = "SAC"
+
         elif trainer == "TD3":
             model = TD3(
                 "MlpPolicy",
@@ -193,6 +317,7 @@ def train_agent(num_rays,
                 )
             )
             trainer_name = "TD3"
+
         elif trainer == "TQC":
             model = TQC(
                 "MlpPolicy",
@@ -210,6 +335,25 @@ def train_agent(num_rays,
                 policy_kwargs=policy_kwargs
             )
             trainer_name = "TQC"
+
+        elif trainer == "A2C":
+            model = A2C(
+            "MlpPolicy",
+            env,
+            verbose=1,
+            tensorboard_log=log_dir,
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            learning_rate=7e-4,
+            n_steps=5,
+            gamma=0.99,
+            gae_lambda=1.0,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
+            policy_kwargs=policy_kwargs
+            )
+            trainer_name = "A2C"
+
         elif trainer == "BC":
             print("Loading BC model from bc_policy/bc_model.zip...")
 
@@ -256,12 +400,17 @@ def train_agent(num_rays,
     )
 
     reward_callback = RewardCallback()
-    scenario_success_callback = ScenarioSuccessCallback(log_freq=50000, verbose=1)
+    scenario_success_callback = ScenarioSuccessCallback(log_freq=2000, verbose=1)
 
 
 
     callbacks = [checkpoint_callback, reward_callback, scenario_success_callback]
     
+
+    if render_training and num_envs == 1:
+        # Add render callback only if training in a single environment
+        callbacks.append(RenderCallback())
+
     # Train the model
     if trainer_name is not None:
         print(f"Training {trainer_name} agent for {num_steps} steps...")
@@ -330,8 +479,10 @@ if __name__ == "__main__":
                         help="Number of stacked observations.")
     parser.add_argument("--CL", action="store_true",
                         help="Enable Curriculum Learning.")
-    parser.add_argument("--bc_path", type=str, default="bc_policy/bc_model.zip",
+    parser.add_argument("--bc_path", type=str, default="bc_policy/",
                         help="Path to the pre-trained BC policy model.")
+    parser.add_argument("--render_training", action="store_true",
+                        help="Render the training environment (single env only).")
 
     args = parser.parse_args()
     stacking = not args.no_stacking
@@ -357,13 +508,18 @@ if __name__ == "__main__":
             vecnorm_path = os.path.join("./TENSORBOARD/", f"{args.run_id}.pkl")
             if os.path.exists(vecnorm_path):
                 eval_env = VecNormalize.load(vecnorm_path, eval_env)
+                print()
+                print(f"✅ Loaded VecNormalize parameters from {vecnorm_path}")
+                print()
             else:
                 fallback_path = os.path.join("./TENSORBOARD/", "vecnormalize.pkl")
+                print(f"⚠️  VecNormalize file '{vecnorm_path}' not found, trying fallback '{fallback_path}'")
                 if os.path.exists(fallback_path):
                     eval_env = VecNormalize.load(fallback_path, eval_env)
                 else:
                     print("⚠️  No VecNormalize file found, using default normalization")
-                    eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False)
+                    #eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False)
+                    eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=True, clip_obs=10.0) # if .pkl file is found, usually this is not needed
 
             eval_env.training = False
             eval_env.norm_reward = False
@@ -377,6 +533,9 @@ if __name__ == "__main__":
             model = TD3.load(name)
         elif args.trainer.upper() == "TQC":
             model = TQC.load(name)
+
+
+        # Testing IL policy
         elif args.trainer.upper() == "BC":
             # ---------- BC model: reuse existing eval_env (don't recreate it) ----
             if not os.path.exists(f"{bc_policy_path}/best_policy.pt"):
@@ -392,7 +551,7 @@ if __name__ == "__main__":
                                     map_location="cpu", weights_only=False)
 
             # Wrap EXISTING eval_env with VecNormalize for obs normalization
-            eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False)
+            eval_env = VecNormalize(eval_env, norm_obs=False, norm_reward=False)
             eval_env.training = False
 
             # Restore normalization statistics if present
@@ -408,26 +567,20 @@ if __name__ == "__main__":
                 eval_env.obs_rms.mean[angle_mask] = 0
                 eval_env.obs_rms.var[angle_mask] = 1
 
-            # Build a PPO policy and load BC weights
-            from lidarCNN_extractor import LidarCNNExtractor
-            policy_kwargs = checkpoint.get("policy_kwargs", {
-                'features_extractor_class': LidarCNNExtractor,
-                'features_extractor_kwargs': {
-                    'n_stacking': checkpoint.get('n_stacking', N_STACKING),
-                    'num_rays': checkpoint.get('num_rays', NUM_RAYS)
-                },
-                'net_arch': dict(pi=[256, 256], vf=[256, 256])
-            })
-
+            policy_kwargs = dict(
+                net_arch=[128, 128],
+                log_std_init=-2.0,
+            )
 
             model = PPO(
-                policy=ActorCriticPolicy,
+                policy="MlpPolicy",
                 env=eval_env,
                 policy_kwargs=policy_kwargs,
                 device="cpu"
             )
             model.policy.load_state_dict(checkpoint['policy_state_dict'], strict=False)
             print("✅ Loaded BC policy successfully.")
+
         else:
             print(f"❌ Unsupported trainer: {args.trainer}")
             exit(1)
@@ -437,15 +590,18 @@ if __name__ == "__main__":
         env.set_real_time_factor(10)
         N_EVAL_EPISODES = 200
 
-        print("🎥 Starting manual evaluation with rendering...")
-        for _ in range(N_EVAL_EPISODES):
-            obs = env.reset()[0]
-            done = False
-            while not done:
-                action, _ = model.predict(obs, deterministic=True)
-                obs, reward, terminated, truncated, info = env.step(action)
-                done = terminated or truncated
-                env.render()  # refresh MuJoCo viewer
+        print("🎥 Starting evaluation with rendering...")
+        # for _ in range(N_EVAL_EPISODES):
+        #     obs = env.reset()[0]
+        #     done = False
+        #     while not done:
+        #         action, _ = model.predict(obs, deterministic=True)
+        #         obs, reward, terminated, truncated, info = env.step(action)
+        #         done = terminated or truncated
+        #         env.render()  # refresh MuJoCo viewer
+
+        mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=300, deterministic=True, render=True)
+
 
         eval_env.close()
 
@@ -462,4 +618,6 @@ if __name__ == "__main__":
             stacking=stacking,
             n_stacking=args.n_stacking,
             cl_resume=args.CL,
+            bc_policy_path=bc_policy_path,
+            render_training=args.render_training
         )

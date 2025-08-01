@@ -99,8 +99,12 @@ class ScenarioSuccessCallback(BaseCallback):
             overall_success_rate = total_successes_all / total_episodes_all
             print(f"Overall Success Rate: {overall_success_rate:.3f} ({total_successes_all}/{total_episodes_all})")
             
-            if hasattr(self, 'logger') and self.logger:
+            if getattr(self, 'logger', None):
                 self.logger.record("training/overall_success_rate", overall_success_rate)
+
+        # ALWAYS flush any recorded metrics
+        if getattr(self, 'logger', None):
+            self.logger.dump(self.num_timesteps)
         
         print("=" * 50)
 
@@ -117,4 +121,12 @@ class PolicySaveCallback(BaseCallback):
             self.model.save(save_file)
             if self.verbose:
                 print(f"✅ Saved model at step {self.num_timesteps} to {save_file}")
+        return True
+    
+class RenderCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+       
+    def _on_step(self) -> bool:
+        self.training_env.envs[0].render()  # Render the first environment  
         return True
