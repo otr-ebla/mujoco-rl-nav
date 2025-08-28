@@ -44,11 +44,11 @@ def scenario4():
     targethuman4x = 70.1+random_x
     targethuman4y = 16.0  
 
-    human5x = 2.0
-    human5y = 2.0
-    start_orientation_human5 = -90.0
-    targethuman5x = 2.0
-    targethuman5y = 2.0
+    human5x = 30.1 
+    human5y = 19.8 +random_y
+    start_orientation_human5 = 0.0
+    targethuman5x = 49.0 + random_x
+    targethuman5y = 19.8 + random_y
 
     
 

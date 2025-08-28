@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 import gymnasium as gym 
 import mujoco
 import mujoco.viewer
-# Scenario 6: il robot deve girare attorno al tavolo centrale
+# Scenario 6: DUE PORTE LATERALI con un umano
 
 # IMPOSSIBILE
 
@@ -19,7 +19,7 @@ def scenario6():
     in_rad_90 = np.deg2rad(-90)
     mob_robot_start_orientation = in_rad_90 + rad_angle #-90
     target_robot_x = 55.33 + random_x
-    target_robot_y = 6.64
+    target_robot_y = 5.64
 
     human1x = 48.57 + random_x
     human1y = 9.2 + random_y

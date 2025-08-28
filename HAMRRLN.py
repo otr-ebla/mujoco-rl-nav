@@ -12,7 +12,6 @@ from typing import Dict, List, Tuple, Optional, Any
 
 import logging
 from collections import deque
-from pynput import keyboard
 # Import scenarios efficiently
 from scenarios import scenario1, scenario1_easy, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8, scenario9, scenario10, scenario11, scenario12, scenario1_nohumans
 #from no_humans_scenariosS import scenario1_nh, scenario2_nh, scenario3_nh, scenario4_nh, scenario5_nh, scenario6_nh, scenario7_nh, scenario8_nh, scenario9_nh, scenario10_nh, scenario11_nh, scenario12_nh
@@ -25,7 +24,6 @@ from assets.collisondetector import CollisionDetector
 
 from IL_HAMRRLN import NUM_RAYS, N_STACKING
 
-import os
 os.environ['JAX_PLATFORMS'] = 'cpu'
 
 # Constants
@@ -46,7 +44,7 @@ PROGRESS_REWARD_SCALE = 0.03  # Scale for progress reward
 
 N_HUMANS = 5  # Default number of humans in the environment 
 
-keyboard_active = False  # Set to False to disable keyboard control
+keyboard_active = os.environ.get('KEYBOARD_CONTROL', '0') == '1'
 key_pressed = set()
 
 def on_press(key):
@@ -60,6 +58,19 @@ def on_release(key):
         key_pressed.discard(key.char)
     except AttributeError:
         pass
+
+
+# crea listener solo se esplicitamente richiesto e se esiste DISPLAY
+if keyboard_active and os.environ.get('DISPLAY', ''):
+    try:
+        from pynput import keyboard
+        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+        listener.start()
+    except Exception as e:
+        print(f"⚠️ Warning: Keyboard control requested but failed to initialize listener: {e}")
+        keyboard_active = False
+else:
+    keyboard_active = False
 
 
 
@@ -126,8 +137,8 @@ class hamrrln(mobilerobotRL):
         self.scenario_successes = {i: 0 for i in range(1, len(self.scenario_mapping)+2)}
         self.scenario_attempts = {i: 1 for i in range(1, len(self.scenario_mapping)+2)}  # Avoid division by zero
 
-        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-        listener.start()
+        # listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+        # listener.start()
         
         # Pre-load obstacles for better performance
         self._initialize_obstacles()
@@ -160,14 +171,13 @@ class hamrrln(mobilerobotRL):
         self.scenarios = [
             scenario1.scenario1, # uguale a scenario1 ma con target meno random
             scenario4.scenario4, # Corridoio
-            scenario9.scenario9, # Scenario con ostacoli    
-            scenario12.scenario12, # Scenario con ostacoli e robot
-            scenario1.scenario1, # Scenario senza umani
-            scenario11.scenario11, # Scenario con ostacoli e robot
-            scenario7.scenario7, # Scenario con robot che gira tra le colonne
             scenario5.scenario5, # Scenario con robot che gira tra le colonne
             scenario6.scenario6, # Scenario con robot che gira tra le colonne
+            scenario7.scenario7, # Scenario con robot che gira tra le colonne
             scenario8.scenario8, # Scenario con robot che attraversa la porta con 3 umani nel mezzo
+            scenario9.scenario9, # Scenario con ostacoli    
+            scenario11.scenario11, # Scenario con ostacoli e robot
+            scenario12.scenario12, # Scenario con ostacoli e robot 
         ]
         
         self._setup_mujoco()
