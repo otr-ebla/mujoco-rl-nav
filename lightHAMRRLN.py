@@ -18,8 +18,9 @@ from scenarios import scenario1, scenario1_easy, scenario2, scenario3, scenario4
 from scenarios import scenarioTEST1, scenarioTEST2, scenarioTEST3
 #from no_humans_scenariosS import scenario1_nh, scenario2_nh, scenario3_nh, scenario4_nh, scenario5_nh, scenario6_nh, scenario7_nh, scenario8_nh, scenario9_nh, scenario10_nh, scenario11_nh, scenario12_nh
 
+import jax
 import jax.numpy as jnp
-from JHSFM.jhsfm.hsfm import step
+from JHSFM.jhsfm.hsfm import step as hsfm_step
 from JHSFM.jhsfm.utils import get_standard_humans_parameters
 from grid_decomp.labeled_grid import GridCell_operations
 #from assets.collisondetector import CollisionDetector
@@ -86,7 +87,7 @@ class light_hamrrln(mobilerobotRL):
         self.n_stacking = n_stacking  # Number of observations to stack
         self.enable_stacking = enable_stacking  # Enable or disable observation stacking
 
-        
+        self.hsfm_step = jax.jit(hsfm_step)
         
         # Timing parameters
         
@@ -164,23 +165,28 @@ class light_hamrrln(mobilerobotRL):
 
         self.scenarios = [
             ##########scenario1.scenario1, # Incrocio caos
-            # scenario4.scenario4, # Corridoio - PARALLEL TRAFFIC
+            scenario4.scenario4, # Corridoio - PARALLEL TRAFFIC
             
-            # scenario5.scenario5, # Scenario con robot che si muove tra 3 tavoli con umani
-            # scenario6.scenario6, # Scenario con robot attravers DUE PORTE
-            # scenario7.scenario7, # Scenario con robot che gira tra le colonne
-            # scenario8.scenario8, # Scenario in fondo, con robot che attraversa la porta con 3 umani nel mezzo
+            scenario5.scenario5, # Scenario con robot che si muove tra 3 tavoli con umani
+            scenario6.scenario6, # Scenario con robot attravers DUE PORTE
+            scenario7.scenario7, # Scenario con robot che gira tra le colonne
+            scenario8.scenario8, # Scenario in fondo, con robot che attraversa la porta con 3 umani nel mezzo
 
-            # scenario9.scenario9, # PERPEDICULAR TRAFFIC - GENERALMENTE NON MESSO IN TRAINING
+            scenario9.scenario9, # PERPEDICULAR TRAFFIC - GENERALMENTE NON MESSO IN TRAINING
 
-            # scenario12.scenario12, # Scenario EASY, EASIEST VERY VERY VERY EASY stanza all'inizio a destra
-            # scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFIC
-            # scenarioTEST2.scenarioTEST2, # TEST - Incrocio caos
+            scenario12.scenario12, # Scenario EASY, EASIEST VERY VERY VERY EASY stanza all'inizio a destra
+            
+            scenarioTEST2.scenarioTEST2, # TEST - Incrocio caos
             scenarioTEST3.scenarioTEST3, # TEST - PERPEDICULAR TRAFFIC con 7 umani
+            scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFIC
 
             # scenario 5 (robot tra 3 tavoli con umani che si muove parallelamente a lui )può essere usato ANCHE come test dopo training
         ]
         
+        if len(self.scenarios) < 8:
+            print("\n\n\n⚠️ STAI ADDESTRANDO CON POCHI SCENARI! ⚠️\n\n\n")
+
+
         self._setup_mujoco()
 
 
@@ -199,6 +205,21 @@ class light_hamrrln(mobilerobotRL):
         self.obstacles = None
         self.all_obstacles = False  # Set to True to enable all obstacles !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         self.humans_state_numpy = np.zeros((self.n_humans, 6), dtype=np.float32)
+
+        #--- NEW: pre-carica linee raw (se disponibili) ---
+        self._grid_lines = None
+        self._mesh_lines = None
+        try:
+            with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt', 'r') as f:
+                self._grid_lines = f.readlines()
+        except FileNotFoundError:
+            logging.error("Grid file not found (labeled_grid_cleaned.txt)")
+
+        try:
+            with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/mesh_edges.txt', 'r') as f:
+                self._mesh_lines = f.readlines()
+        except FileNotFoundError:
+            logging.error("Mesh file not found (mesh_edges.txt)")
         
         if self.all_obstacles:
             obstacles_data = self._get_all_obstacles()
@@ -354,11 +375,27 @@ class light_hamrrln(mobilerobotRL):
             for i in range(self.num_rays)
         ]
         
+        # NEW: array NumPy fisso degli indici sensori (riusato a ogni step)
+        self.sensor_ids_np = np.asarray(self.lidar_sensor_ids, dtype=np.int32)
+        # (opzionale) valida che tutti i sensori siano stati trovati
+        if np.any(self.sensor_ids_np < 0):
+            missing = np.where(self.sensor_ids_np < 0)[0].tolist()
+            logging.error(f"LIDAR sensors not found for indices: {missing}")
+
+        # NEW: cache dell'ID del geom 'sphere' (bersaglio) per evitare lookup ripetuti
+        self.sphere_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "sphere")
+        if self.sphere_geom_id < 0:
+            logging.error("Target geom 'sphere' not found in model.")
+
         # Cache human body IDs
         self.human_body_ids = np.array([
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"human{i+1}")
             for i in range(self.n_humans)
         ], dtype=np.int32)
+
+
+
+
 
     def reset(self, seed: Optional[int] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset the environment to initial state."""
@@ -423,10 +460,6 @@ class light_hamrrln(mobilerobotRL):
         
         # Initialize humans state tracking
         self._initialize_humans_tracking()
-
-      
-
-        self._reset_observation_stack() # Reset observation stack
         
         info = self._get_info()
 
@@ -440,18 +473,8 @@ class light_hamrrln(mobilerobotRL):
         mujoco.mj_forward(self.model, self.data)  # ensures all derived state like xmat is valid       
         return observation, info
 
-    def _reset_observation_stack(self):
-        """Reset the observation stack with the first lidar reading repeated."""
-        return
 
-    
-    def _update_lidar_stack(self, new_lidar_reading: np.ndarray):
-        """Update the lidar stack with new reading."""
-        # Add new reading (automatically removes oldest due to maxlen)
-        if not self.enable_stacking:
-            return
 
-        self.lidar_stack.append(new_lidar_reading.copy())
 
     
 
@@ -583,11 +606,10 @@ class light_hamrrln(mobilerobotRL):
     
     def _set_target_position(self, scenario_data: Dict[str, float]):
         """Set target sphere position."""
-        sphere_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "sphere")
-        if sphere_id >= 0:
+        if self.sphere_geom_id >= 0:
             target_x = scenario_data["target_robot_x"]
             target_y = scenario_data["target_robot_y"] 
-            self.model.geom_pos[sphere_id, :] = [target_x, target_y, 2.0]
+            self.model.geom_pos[self.sphere_geom_id, :] = [target_x, target_y, 2.0]
         self.target_pos = np.array([scenario_data["target_robot_x"], scenario_data["target_robot_y"]], dtype=np.float32)
     
     def _initialize_humans_tracking(self):
@@ -610,10 +632,8 @@ class light_hamrrln(mobilerobotRL):
         
     def _get_state(self) -> np.ndarray:
         """Get the current state of the environment."""
-        sensor_ids = np.asarray(self.lidar_sensor_ids, dtype=np.int32)
-        #if (self.current_step%3) == 0:
-        current_lidar = np.asarray(self.data.sensordata[sensor_ids], dtype=np.float32)
-            
+        current_lidar = np.asarray(self.data.sensordata[self.sensor_ids_np], dtype=np.float32)
+
         # --- GOAL INFO ---
         delta = self.target_pos[:2] - self.robot_pos[:2]
         distance_to_target = np.linalg.norm(delta)
@@ -666,7 +686,7 @@ class light_hamrrln(mobilerobotRL):
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """Execute one step in the environment."""
-        prev_obs = self._get_obs()
+        prev_obs = self._get_obs() 
 
         assert action.shape == (2,), f"Expected action shape (2,), got {action.shape}"
 
@@ -686,7 +706,7 @@ class light_hamrrln(mobilerobotRL):
         self.episode_time = time.time() - self.episode_time_begin
         self.current_step += 1
 
-        if self.training:
+        if self.training: # if training, robot is not seen by humans
             self._apply_robot_action(action, dt = self.robot_dt)
 
         # Update humans simulation (robot_velocity_body now ready)
@@ -694,15 +714,13 @@ class light_hamrrln(mobilerobotRL):
 
         # Step MuJoCo physics
         mujoco.mj_step(self.model, self.data)
+
+
+
+
         self._theta_hist.append(float(self.robot_theta))
 
-        
-        # Update previous action for next observation
-        # if not hasattr(self, 'previous_action'):
-        #     self.previous_action = np.zeros(2, dtype=np.float32)
-        # self.previous_action = action.copy()
-
-        # Get observation and info
+        # Get observation and info after having applied action and stepped physics
         info = self._get_info()
         observation = self._get_obs(info)
 
@@ -767,9 +785,8 @@ class light_hamrrln(mobilerobotRL):
     def _get_info(self) -> Dict[str, Any]:
         """Compact info object matching the new observation format."""
         # Distance to target sphere (same as before)
-        target_sphere_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "sphere")
-        if target_sphere_id >= 0:
-            sphere_pos = self.model.geom_pos[target_sphere_id]
+        if self.sphere_geom_id >= 0:
+            sphere_pos = self.model.geom_pos[self.sphere_geom_id]
             distance_to_sphere = float(np.linalg.norm(sphere_pos[:2] - self.robot_pos[:2]))
         else:
             distance_to_sphere = float('inf')
@@ -791,7 +808,7 @@ class light_hamrrln(mobilerobotRL):
     
     def _collision_detection(self, current_lidar):
         
-        if np.min(current_lidar) <= 0.2:
+        if np.min(current_lidar) <= ROBOT_RADIUS:
             if DEBUG:
                 print(f"Min LIDAR: {np.min(current_lidar):.3f}")
             return True
@@ -809,8 +826,8 @@ class light_hamrrln(mobilerobotRL):
             ang_vel = float(action[1])  # -1 to 1
 
 
-            x, y, theta = self.data.qpos[:3]
-
+            #x, y, theta = self.data.qpos[:3]
+            x, y, theta = self.robot_pos[0], self.robot_pos[1], self.robot_theta
     
             
             # Optimized kinematic update
@@ -835,8 +852,8 @@ class light_hamrrln(mobilerobotRL):
             # Warp theta to [-pi, pi]
             theta = (theta + np.pi) % (2 * np.pi) - np.pi
 
-            self.data.qpos[:3] = [x, y, theta]
-            self.robot_pos = self.data.qpos[:2]  # Update robot position
+            self.data.qpos[:3] = np.array([x, y, theta], dtype=np.float32)
+            self.robot_pos = np.array([x, y], dtype=np.float32)  # Update robot position
             self.robot_theta = theta  # Update robot orientation
 
         else:
@@ -873,12 +890,7 @@ class light_hamrrln(mobilerobotRL):
     def _update_humans_simulation(self, action):
         """Update humans simulation using HSFM, optionally including robot in the simulation during testing."""
 
-        # if not self.all_obstacles:
-        #     # Dynamic obstacle detection (less efficient)
-        #     found_obstacles = self._get_obstacles_from_human_positions(self.humans_state_numpy)
-        #     self.obstacles = self._get_static_obstacles_formatted(found_obstacles)
-
-        # --- costruisci ostacoli per-umano dalle 8 celle adiacenti ---
+        # Build obstacles for each human around the grid
         if self.use_grid_obstacles:
             obstacles_agents = self._build_grid_obstacles_per_human()
         else:
@@ -905,7 +917,7 @@ class light_hamrrln(mobilerobotRL):
                 # Costruisci lo stato del robot da aggiungere temporaneamente
                 # Track previous robot position
                 self.prev_robot_pos = self.robot_pos.copy()
-                self.robot_pos[:] = self.data.xpos[self.mobile_robot_ID,:2]
+                self.robot_pos[:] = self.data.qpos[:2]
                 robot_theta = self.data.qpos[2]
                 self.robot_theta = robot_theta  # save for use in humans_simulation
 
@@ -940,32 +952,15 @@ class light_hamrrln(mobilerobotRL):
 
                 # Parametri: umani + copia di un umano per il robot
                 robot_params = self.human_parameters[:1]  # oppure un set dedicato
-                robot_params = robot_params.at[0].set(ROBOT_RADIUS) 
+               #robot_params = robot_params.at[0].set(ROBOT_RADIUS) 
                 params_extended = jnp.concatenate([
                     self.human_parameters,
                     robot_params
                 ], axis=0)
 
-                # Ostacoli: aggiungi dummy per robot
-                # obstacles_extended = jnp.concatenate([
-                #     self.obstacles,
-                #     self.obstacles[:1]
-                # ], axis=0)
-
-
-                # # Esegui passo JHSFM e scarta il robot
-                # humans_state_with_robot = step(
-                #     humans_state_extended,
-                #     goals_extended,
-                #     params_extended,
-                #     obstacles_extended,
-                #     self.humans_dt,
-                # )
-
-                # ... costruzione humans_state_extended / goals / params ...
-                # Estendi anche gli ostacoli: per il robot duplichiamo una riga
+         
                 obstacles_extended = jnp.concatenate([obstacles_agents, obstacles_agents[:1]], axis=0)
-                humans_state_with_robot = step(
+                humans_state_with_robot = self.hsfm_step(
                     humans_state_extended,
                     goals_extended,
                     params_extended,
@@ -977,15 +972,13 @@ class light_hamrrln(mobilerobotRL):
                 # Apply robot action (NN output)
                 self._apply_robot_action(action, dt = 0.01)
                 humans_state_jax = humans_state_with_robot[:-1]  # escludi il robot
-                mujoco.mj_step(self.model, self.data)  # Forward MuJoCo to update robot position
                 
             else:
                 # Training: nessun robot presente
-                humans_state_jax = step(
+                humans_state_jax = self.hsfm_step(
                     humans_state_jax,
                     self.humans_current_goals,
                     self.human_parameters,
-                    #self.obstacles,
                     obstacles_agents,
                     self.humans_dt,
                 )
@@ -1106,6 +1099,7 @@ class light_hamrrln(mobilerobotRL):
 
         # 1) Collisione immediata
         if self._collision_detection(current_lidar):
+            
             self.last_episode_result = "collision"
             terminated = True
             step_reward += -70.0
@@ -1231,80 +1225,86 @@ class light_hamrrln(mobilerobotRL):
         """Get obstacles from human positions with caching."""
         humans_state = np.array(humans_state_tuple).reshape(-1, 6)
         obstacles_per_human = []
-        
-        grid_file_path = '/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt'
-        
-        try:
-            with open(grid_file_path, 'r') as f:
-                lines = f.readlines()
-            
-            for i in range(self.n_humans):
-                hx, hy = humans_state[i, 0], humans_state[i, 1]
-                cell_x, cell_y = self.grid_cell_op.world_to_grid(hx, hy)
-                
-                found_obstacles = []
-                for line in lines:
-                    if line.startswith(f"Cell {cell_x},{cell_y}") or line.startswith(f"Cell {cell_x}, {cell_y}"):
-                        parts = line.strip().split(":", 1)
-                        if len(parts) == 2:
-                            obstacle_str = parts[1].strip()
-                            if obstacle_str:
-                                found_obstacles = obstacle_str.split("|")
-                        break
-                
-                obstacles_per_human.append(found_obstacles)
-                
-        except FileNotFoundError:
-            logging.error("Grid file not found")
-            return [[] for _ in range(self.n_humans)]
-        
+
+        # --- NEW: usa le linee pre-caricate, se disponibili ---
+        lines = self._grid_lines
+        if lines is None:
+            # Fallback legacy (identico al tuo comportamento attuale)
+            grid_file_path = '/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt'
+            try:
+                with open(grid_file_path, 'r') as f:
+                    lines = f.readlines()
+            except FileNotFoundError:
+                logging.error("Grid file not found")
+                return [[] for _ in range(self.n_humans)]
+
+        # parsing identico all’attuale
+        for i in range(self.n_humans):
+            hx, hy = humans_state[i, 0], humans_state[i, 1]
+            cell_x, cell_y = self.grid_cell_op.world_to_grid(hx, hy)
+
+            found_obstacles = []
+            for line in lines:
+                if line.startswith(f"Cell {cell_x},{cell_y}") or line.startswith(f"Cell {cell_x}, {cell_y}"):
+                    parts = line.strip().split(":", 1)
+                    if len(parts) == 2:
+                        obstacle_str = parts[1].strip()
+                        if obstacle_str:
+                            found_obstacles = obstacle_str.split("|")
+                    break
+
+            obstacles_per_human.append(found_obstacles)
+
         return obstacles_per_human
+
     
     @lru_cache(maxsize=1)
     def _get_all_obstacles(self) -> Optional[jnp.ndarray]:
         """Load all obstacles from file with caching."""
-        mesh_file_path = '/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/mesh_edges.txt'
         static_obstacles = []
-        
-        try:
-            with open(mesh_file_path, 'r') as f:
-                lines = f.readlines()
-            
-            i = 0
-            while i < len(lines):
-                line = lines[i].strip()
-                
-                if line.endswith(":"):
-                    # Parse 4 vertices
-                    vertices = []
-                    for j in range(1, 5):
-                        if i + j < len(lines):
-                            coord_line = lines[i + j].strip()
-                            try:
-                                x_str, y_str = coord_line.split(',')
-                                vertices.append([float(x_str.strip()), float(y_str.strip())])
-                            except ValueError:
-                                logging.warning(f"Could not parse coordinate: {coord_line}")
-                                continue
-                    
-                    if len(vertices) == 4:
-                        # Create 4 edges for the obstacle
-                        edges = [
-                            [vertices[0], vertices[1]],
-                            [vertices[1], vertices[2]], 
-                            [vertices[2], vertices[3]],
-                            [vertices[3], vertices[0]],
-                        ]
-                        static_obstacles.append(edges)
-                    
-                    i += 4  # Skip the vertex lines
-                i += 1
-                
-        except FileNotFoundError:
-            logging.error("mesh_edges.txt not found")
-            return None
-        
+
+        # --- NEW: usa linee pre-caricate se presenti ---
+        lines = self._mesh_lines
+        if lines is None:
+            mesh_file_path = '/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/mesh_edges.txt'
+            try:
+                with open(mesh_file_path, 'r') as f:
+                    lines = f.readlines()
+            except FileNotFoundError:
+                logging.error("mesh_edges.txt not found")
+                return None
+
+        # parsing identico al tuo (blocchi da 1 riga titolo + 4 coordinate)
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+
+            if line.endswith(":"):
+                vertices = []
+                for j in range(1, 5):
+                    if i + j < len(lines):
+                        coord_line = lines[i + j].strip()
+                        try:
+                            x_str, y_str = coord_line.split(',')
+                            vertices.append([float(x_str.strip()), float(y_str.strip())])
+                        except ValueError:
+                            logging.warning(f"Could not parse coordinate: {coord_line}")
+                            continue
+
+                if len(vertices) == 4:
+                    edges = [
+                        [vertices[0], vertices[1]],
+                        [vertices[1], vertices[2]],
+                        [vertices[2], vertices[3]],
+                        [vertices[3], vertices[0]],
+                    ]
+                    static_obstacles.append(edges)
+
+                i += 4  # salta le 4 righe di coordinate
+            i += 1
+
         return jnp.array(static_obstacles) if static_obstacles else None
+
     
     def render(self, mode: str = 'human') -> bool:
         """Render the environment."""
@@ -1324,11 +1324,3 @@ class light_hamrrln(mobilerobotRL):
         if self.viewer:
             self.viewer.close()
             self.viewer = None
-    
-        
-    def get_current_lidar_stack(self) -> np.ndarray:
-        """
-        Get the current lidar stack as a 2D array for visualization/debugging.
-        Returns shape: (n_stacking, num_rays)
-        """
-        return np.stack(list(self.lidar_stack), axis=0)

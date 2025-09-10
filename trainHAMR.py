@@ -43,6 +43,40 @@ os.environ.setdefault("PYTORCH_NUM_THREADS", "1")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
  
+def _guard_unique_run_id(run_id: str, log_dir: str = "./TENSORBOARD", ckpt_dir: str = "./policy_checkpoints"):
+    """
+    Raise FileExistsError if a run_id already has saved artifacts.
+    We look for:
+      - {run_id}.zip (final model)
+      - {log_dir}/{run_id}.pkl (VecNormalize)
+      - {ckpt_dir}/{run_id}_*.zip (checkpoints)
+      - {log_dir}/{run_id} (TensorBoard subdir)
+    """
+    candidates = [
+        f"{run_id}.zip",
+        os.path.join(log_dir, f"{run_id}.pkl"),
+    ]
+
+    exists = any(os.path.exists(p) for p in candidates)
+
+    # checkpoints dir
+    if os.path.isdir(ckpt_dir):
+        for fn in os.listdir(ckpt_dir):
+            if fn.startswith(run_id + "_") and fn.endswith(".zip"):
+                exists = True
+                break
+
+    # tensorboard subdir
+    tb_subdir = os.path.join(log_dir, run_id)
+    if os.path.isdir(tb_subdir):
+        exists = True
+
+    if exists:
+        raise FileExistsError(
+            f"\n\nrun_id '{run_id}' già esistente: trova artefatti salvati. "
+            f"Scegli un run_id diverso oppure rimuovi/archivia i file associati."
+        )
+
 
 
 def _safe_save(model, env, run_id, log_dir, suffix="interrupt"):
@@ -95,12 +129,16 @@ def train_agent(num_rays,
                 n_stacking=10,
                 cl_resume = False,
                 bc_policy_path="bc_policy/",
-                render_training=False):
+                render_training=False,
+                force=False):
     
     n_humans = N_HUMANS
     
     log_dir = "./TENSORBOARD/"
     os.makedirs(log_dir, exist_ok=True)
+    if not force:
+        _guard_unique_run_id(run_id, log_dir=log_dir, ckpt_dir="./policy_checkpoints")
+
 
     if not training:
         env = hamrrln(
@@ -571,6 +609,8 @@ if __name__ == "__main__":
                         help="Path to the pre-trained BC policy model.")
     parser.add_argument("--render_training", action="store_true",
                         help="Render the training environment (single env only).")
+    parser.add_argument("--force", action="store_true",
+                        help="Force overwrite if run_id exists.")
 
     args = parser.parse_args()
     stacking = not args.no_stacking
@@ -717,5 +757,6 @@ if __name__ == "__main__":
             n_stacking=args.n_stacking,
             cl_resume=args.CL,
             bc_policy_path=bc_policy_path,
-            render_training=args.render_training
+            render_training=args.render_training,
+            force=args.force,
         )

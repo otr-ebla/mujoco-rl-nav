@@ -67,6 +67,7 @@ from IL_HAMRRLN import NUM_RAYS, N_STACKING
 import matplotlib.pyplot as plt
 import psutil
 
+METRICS_DIR = "./EVAL_METRICS"
 
 @dataclass
 class EpisodeMetrics:
@@ -81,6 +82,7 @@ class EpisodeMetrics:
     spl: float
     space_compliance: float
     avg_angular_jerk: float 
+    time_to_goal: float 
     
 
 
@@ -229,6 +231,7 @@ def episode_rollout(env: VecNormalize, model, safe_dist: float) -> EpisodeMetric
     denom = max(path_len, L_star, 1e-6)
     spl = success_flag * (L_star / denom)
     space_compliance = space_ok_steps / max(steps, 1)
+    dt_env = float(getattr(base_env, "robot_dt", 0.25))
 
     return EpisodeMetrics(
         episode=0,
@@ -241,16 +244,16 @@ def episode_rollout(env: VecNormalize, model, safe_dist: float) -> EpisodeMetric
         start_to_goal=L_star,
         spl=spl,
         space_compliance=space_compliance,
-        avg_angular_jerk=float('nan')  # Placeholder, to be computed in parallel evaluation
+        avg_angular_jerk=float('nan'),  # Placeholder, to be computed in parallel evaluation
+        time_to_goal=float(steps * dt_env) if last_result == "success" else np.nan
     )
 
 
 
 def summarize_overall(df: pd.DataFrame) -> pd.DataFrame:
-    # Overall (single-row) summary
-    total = len(df)
+    success_df = df[df["result"] == "success"]
     s = {
-        "episodes": total,
+        "episodes": len(df),
         "success_rate": (df["result"] == "success").mean(),
         "collision_rate": (df["result"] == "collision").mean(),
         "timeout_rate": (df["result"] == "timeout").mean(),
@@ -259,27 +262,33 @@ def summarize_overall(df: pd.DataFrame) -> pd.DataFrame:
         "mean_SPL": df["spl"].mean(),
         "mean_space_compliance": df["space_compliance"].mean(),
         "mean_avg_angular_jerk": df["avg_angular_jerk"].mean(),
+        "mean_time_to_goal_success": success_df["time_to_goal"].mean(),
+        "median_time_to_goal_success": success_df["time_to_goal"].median(),
     }
     return pd.DataFrame([s])
 
 
+
 def summarize_by_scenario(df: pd.DataFrame) -> pd.DataFrame:
-    # Per-scenario summary
     def agg_fun(g: pd.DataFrame) -> pd.Series:
+        gsucc = g[g["result"] == "success"]
         return pd.Series({
             "episodes": len(g),
             "success_rate": (g["result"] == "success").mean(),
             "collision_rate": (g["result"] == "collision").mean(),
             "timeout_rate": (g["result"] == "timeout").mean(),
-            "avg_path_len_success": g.loc[g["result"] == "success", "path_len"].mean(),
+            "avg_path_len_success": gsucc["path_len"].mean(),
             "avg_min_dist_human": g["min_dist_human"].mean(),
             "mean_SPL": g["spl"].mean(),
             "mean_space_compliance": g["space_compliance"].mean(),
             "mean_avg_angular_jerk": g["avg_angular_jerk"].mean(),
+            "mean_time_to_goal_success": gsucc["time_to_goal"].mean(),
+            "median_time_to_goal_success": gsucc["time_to_goal"].median(),
         })
     out = df.groupby("scenario_id", dropna=False).apply(agg_fun).reset_index()
     out = out.sort_values("scenario_id", ascending=True)
     return out
+
 
 def make_env_fn(xml: str, stacking: bool, n_stacking: int, seed: int | None):
     def _init():
@@ -367,6 +376,8 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
     n_envs = env.num_envs
     obs = env.reset()
     base = env.venv  # SubprocVecEnv or DummyVecEnv
+    steps_total = np.zeros(n_envs, dtype=int)
+    steps_eval = np.zeros(n_envs, dtype=int)
 
     def get_attr(name): return base.get_attr(name)
     def env_method(name, indices=None): return base.env_method(name, indices=indices)
@@ -393,7 +404,6 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
 
     path_len = np.zeros(n_envs, dtype=np.float64)
     min_dist = np.full(n_envs, np.inf, dtype=np.float64)
-    steps    = np.zeros(n_envs, dtype=int)
     space_ok = np.zeros(n_envs, dtype=int)
     t0       = np.array([time.time()] * n_envs, dtype=np.float64)
 
@@ -415,6 +425,7 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
         # ---- registra ω comandata dalla policy per ciascun env ----
         for i in range(n_envs):
             info_i = {}  # info prima dello step non c'è: lascio vuoto, l’estrattore userà 'actions'
+            steps_total[i] += 1
             omega_i = _extract_omega_from_action(
                 actions[i],
                 info_i,
@@ -482,10 +493,10 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
                 min_dist[i] = min(min_dist[i], step_min)
                 if step_min >= safe_dist:
                     space_ok[i] += 1
-                steps[i] += 1
+                steps_eval[i] += 1  # solo passi con info umani
             else:
                 # nessuna informazione sulle posizioni umane → segnala passo non valutabile
-                steps[i] += 0  # non incrementare il denominatore qui
+                pass
 
 
         # --- gestione episodi completati ---
@@ -497,12 +508,13 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
                     result = "success" if np.linalg.norm(last_xy[i] - goals[i]) < 0.5 else "timeout"
 
                 elapsed = time.time() - t0[i]
+                sim_time = steps_total[i] * float(dt_envs[i])  # tempo simulato
                 success_flag = 1.0 if result == "success" else 0.0
                 denom = max(path_len[i], L_star[i], 1e-6)
                 spl = success_flag * (L_star[i] / denom)
 
                 # space_compliance: usa solo i passi valutabili
-                space_comp = (space_ok[i] / steps[i]) if steps[i] > 0 else np.nan
+                space_comp = (space_ok[i] / steps_eval[i]) if steps_eval[i] > 0 else np.nan
 
                 md = min_dist[i] if np.isfinite(min_dist[i]) else np.nan
 
@@ -523,14 +535,15 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
                     "episode": ep_counter,
                     "scenario_id": int(scenario_ids[i]),
                     "result": str(result),
-                    "steps": int(steps[i]),
+                    "steps": int(steps_total[i]),
                     "time_s": float(elapsed),
                     "path_len": float(path_len[i]),
                     "min_dist_human": float(md),
                     "start_to_goal": float(L_star[i]),
                     "spl": float(spl),
                     "space_compliance": float(space_comp),
-                    "avg_angular_jerk": avg_ang_jerk
+                    "avg_angular_jerk": avg_ang_jerk,
+                    "time_to_goal": float(sim_time) if result == "success" else np.nan
                 })
                 completed += 1
                 if completed >= episodes_target:
@@ -548,7 +561,8 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
 
                 path_len[i] = 0.0
                 min_dist[i] = np.inf
-                steps[i]    = 0
+                steps_eval[i] = 0
+                steps_total[i] = 0
                 space_ok[i] = 0
                 t0[i]       = time.time()
                 omega_cmd_history[i].clear()
@@ -584,6 +598,11 @@ def main():
 
     if not args.trainer:
         raise ValueError("The --trainer argument must be specified.")
+    
+
+
+    os.makedirs(METRICS_DIR, exist_ok=True)
+
 
     env = load_eval_env(args.run_id, args.xml, args.stacking, N_STACKING, args.n_envs, args.seed)
 
@@ -593,15 +612,16 @@ def main():
     records = evaluate_parallel(env, model, args.episodes, args.safe_dist, args.dt)
     df = pd.DataFrame(records)
     
-    per_episode_csv = f"social_metrics_{args.run_id}_{args.trainer.upper()}.csv"
+    per_episode_csv = os.path.join(METRICS_DIR, f"social_metrics_{args.run_id}_{args.trainer.upper()}.csv")
+
     df.to_csv(per_episode_csv, index=False)
 
     # Reuse your existing summary utilities (unchanged)
     overall_df = summarize_overall(df)
     per_scen_df = summarize_by_scenario(df)
 
-    overall_csv = f"social_metrics_summary_{args.run_id}_{args.trainer.upper()}.csv"
-    per_scen_csv = f"social_metrics_by_scenario_{args.run_id}_{args.trainer.upper()}.csv"
+    overall_csv = os.path.join(METRICS_DIR, f"social_metrics_summary_{args.run_id}_{args.trainer.upper()}.csv")
+    per_scen_csv = os.path.join(METRICS_DIR, f"social_metrics_by_scenario_{args.run_id}_{args.trainer.upper()}.csv")
     overall_df.to_csv(overall_csv, index=False)
     per_scen_df.to_csv(per_scen_csv, index=False)
 
@@ -623,6 +643,38 @@ def main():
     plt.grid(axis="y", linestyle="--", alpha=0.7)
     plt.tight_layout()
     plt.show()
+
+        # --- BOX PLOT: Time-to-Goal per scenario (solo successi) ---
+    df_success = df[df["result"] == "success"].copy()
+    scen_order = sorted(df_success["scenario_id"].dropna().unique().tolist())
+
+    if len(scen_order) > 0 and df_success["time_to_goal"].notna().any():
+        data_by_scen = [df_success.loc[df_success["scenario_id"] == sid, "time_to_goal"].dropna().values
+                        for sid in scen_order]
+
+        plt.figure(figsize=(12, 6))
+        plt.boxplot(data_by_scen, labels=[str(s) for s in scen_order], showfliers=False)
+        plt.xlabel("Scenario ID")
+        plt.ylabel("Time to Goal (s)")
+        plt.title(f"Time-to-Goal by Scenario (Success only) - {args.run_id} ({args.trainer.upper()})")
+        plt.grid(axis="y", linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        plt.show()
+
+    # --- ISTOGRAMMI: SPL per scenario (uno per scenario) ---
+    for sid in sorted(df["scenario_id"].dropna().unique().tolist()):
+        spl_vals = df.loc[df["scenario_id"] == sid, "spl"].dropna().values
+        if spl_vals.size == 0:
+            continue
+        plt.figure(figsize=(8, 5))
+        plt.hist(spl_vals, bins=20, range=(0.0, 1.0), edgecolor="black")
+        plt.xlabel("SPL")
+        plt.ylabel("Count")
+        plt.title(f"SPL Distribution - Scenario {sid} - {args.run_id} ({args.trainer.upper()})")
+        plt.grid(axis="y", linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        plt.show()
+
 
 
     print(f"\nSaved per-episode CSV to {per_episode_csv}")
