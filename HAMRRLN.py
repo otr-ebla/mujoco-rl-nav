@@ -4,6 +4,7 @@ import mujoco
 import mujoco.viewer
 from mobilerobotRL import mobilerobotRL
 import os
+os.environ['JAX_PLATFORMS'] = 'cpu'
 import xml.etree.ElementTree as ET
 import time
 import random
@@ -13,36 +14,22 @@ from typing import Dict, List, Tuple, Optional, Any
 import logging
 from collections import deque
 # Import scenarios efficiently
-from scenarios import scenario1, scenario1_easy, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8, scenario9, scenario10, scenario11, scenario12, scenario1_nohumans
+from scenarios import scenario1, scenario1_easy, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8, scenario9, scenario10, scenario11, scenario12
+from scenarios import scenarioTEST1, scenarioTEST2, scenarioTEST3
 #from no_humans_scenariosS import scenario1_nh, scenario2_nh, scenario3_nh, scenario4_nh, scenario5_nh, scenario6_nh, scenario7_nh, scenario8_nh, scenario9_nh, scenario10_nh, scenario11_nh, scenario12_nh
 
 import jax.numpy as jnp
 from JHSFM.jhsfm.hsfm import step
 from JHSFM.jhsfm.utils import get_standard_humans_parameters
 from grid_decomp.labeled_grid import GridCell_operations
-from assets.collisondetector import CollisionDetector
+#from assets.collisondetector import CollisionDetector
 
-from IL_HAMRRLN import NUM_RAYS, N_STACKING
+from env_config import NUM_RAYS, N_STACKING, MAX_LIN_VEL_ROBOT, MAX_EPISODE_TIME, ROBOT_RADIUS, LIDAR_THRESHOLD, ROBOT_DT, HUMANS_DT, N_HUMANS, PROGRESS_REWARD_SCALE
 
-os.environ['JAX_PLATFORMS'] = 'cpu'
+THETA_HIST_LENGTH = 3
 
-# Constants
-ROBOT_RADIUS = 0.2
-LIDAR_THRESHOLD = 0.4  # ROBOT_RADIUS * 2
-HUMANS_DT = 0.01
-DISTANCE_SUCCESS_THRESHOLD = 0.5
-
-#NUM_RAYS = 108  # Number of lidar rays
-
-MAX_EPISODE_TIME = 50 # MAX_EPISODE_TIME s
-
-#N_STACKING = 10  # Default stacking size for observations
-
-ROBOT_DT = 0.25 # Robot control timestep in seconds
-MAX_LIN_VEL_ROBOT = 1.0    # da non confondere con il robot_dt che è il passo di controllo del robot
-PROGRESS_REWARD_SCALE = 0.03  # Scale for progress reward
-
-N_HUMANS = 5  # Default number of humans in the environment 
+DEBUG = False
+DEBUG_DATA = False
 
 keyboard_active = os.environ.get('KEYBOARD_CONTROL', '0') == '1'
 key_pressed = set()
@@ -114,7 +101,23 @@ class hamrrln(mobilerobotRL):
         #self.human_parameters = get_standard_humans_parameters(self.n_humans + 1 if not self.training else self.n_humans)
         self.human_parameters = get_standard_humans_parameters(self.n_humans)
 
+
+
+        
+
+
         self.grid_cell_op = GridCell_operations(cell_size=4, world_size=320)
+        self.max_grid_obs = 10
+        self.max_edges = 4
+        # dopo self.grid_cell_op = GridCell_operations(cell_size=4, world_size=320)
+        self.grid_cell_op.load_labeled_grid_from_file(
+            "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt"
+        )
+        self.grid_cell_op.load_meshes_index(
+            "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/mesh_edges.txt"
+        )
+        self.grid_radius = 1                   # 8 celle attorno (Moore neighborhood)
+        self.use_grid_obstacles = True         # <— attiva schema veloce
 
         self.current_scenario_id = None
         self.scenario_mapping = {
@@ -131,7 +134,9 @@ class hamrrln(mobilerobotRL):
             scenario11.scenario11: 11,
             scenario12.scenario12: 12,
             scenario1_easy.scenario1_easy: 13,
-            scenario1_nohumans.scenario1_nohumans: 14,
+            scenarioTEST1.scenarioTEST1: 14,
+            scenarioTEST2.scenarioTEST2: 15,
+            scenarioTEST3.scenarioTEST3: 16
         }
 
         self.scenario_successes = {i: 0 for i in range(1, len(self.scenario_mapping)+2)}
@@ -147,7 +152,7 @@ class hamrrln(mobilerobotRL):
         self._reset_episode_counters()
         
         # Initialize state variables
-        self._initialize_state_variables()
+        self._initialize_state_variables() 
         
         # Initialize observation stacking
         self._initialize_observation_stacking()
@@ -156,28 +161,23 @@ class hamrrln(mobilerobotRL):
         self._setup_spaces()
         
 
-        # Training scenarios
-        # self.scenarios = [
-        #     scenario1_easy.scenario1_easy,
-        #     scenario4.scenario4, # Corridoio
-        #     scenario9.scenario9, # Scenario con ostacoli    
-        #     scenario10.scenario10, # Scenario con ostacoli e robot
-        #     scenario11.scenario11, # Scenario con ostacoli e robot  
-        #     scenario12.scenario12, # Scenario con ostacoli e robot
-        #     scenario1_nohumans.scenario1_nohumans, # Scenario senza umani
-        # ]
-
-        # Testing scenarios for IL
         self.scenarios = [
-            scenario1.scenario1, # uguale a scenario1 ma con target meno random
-            scenario4.scenario4, # Corridoio
-            scenario5.scenario5, # Scenario con robot che gira tra le colonne
-            scenario6.scenario6, # Scenario con robot che gira tra le colonne
+            ##########scenario1.scenario1, # Incrocio caos
+            scenario4.scenario4, # Corridoio - PARALLEL TRAFFIC
+            
+            scenario5.scenario5, # Scenario con robot che si muove tra 3 tavoli con umani
+            scenario6.scenario6, # Scenario con robot attravers DUE PORTE
             scenario7.scenario7, # Scenario con robot che gira tra le colonne
-            scenario8.scenario8, # Scenario con robot che attraversa la porta con 3 umani nel mezzo
-            scenario9.scenario9, # Scenario con ostacoli    
-            scenario11.scenario11, # Scenario con ostacoli e robot
-            scenario12.scenario12, # Scenario con ostacoli e robot 
+            scenario8.scenario8, # Scenario in fondo, con robot che attraversa la porta con 3 umani nel mezzo
+
+            scenario9.scenario9, # PERPEDICULAR TRAFFIC - GENERALMENTE NON MESSO IN TRAINING
+
+            scenario12.scenario12, # Scenario EASY, EASIEST VERY VERY VERY EASY stanza all'inizio a destra
+            #scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFIC
+            scenarioTEST2.scenarioTEST2, # TEST - Incrocio caos
+            scenarioTEST3.scenarioTEST3, # TEST - PERPEDICULAR TRAFFIC con 7 umani
+
+            # scenario 5 (robot tra 3 tavoli con umani che si muove parallelamente a lui )può essere usato ANCHE come test dopo training
         ]
         
         self._setup_mujoco()
@@ -196,16 +196,53 @@ class hamrrln(mobilerobotRL):
     def _initialize_obstacles(self):
         """Initialize obstacle data efficiently."""
         self.obstacles = None
-        self.all_obstacles = True
+        self.all_obstacles = False  # Set to True to enable all obstacles !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         self.humans_state_numpy = np.zeros((self.n_humans, 6), dtype=np.float32)
         
         if self.all_obstacles:
             obstacles_data = self._get_all_obstacles()
             if obstacles_data is not None:
                 self.obstacles = jnp.stack([obstacles_data] * self.n_humans)
+
+    def _build_grid_obstacles_per_human(self):
+        H = self.n_humans
+        M = int(self.max_grid_obs)   # 10
+        E = int(self.max_edges)      # 4
+        out = np.full((H, M, E, 2, 2), np.nan, dtype=np.float32)  # padding a NaN
+
+        for i in range(H):
+            x = float(self.humans_state_numpy[i, 0])
+            y = float(self.humans_state_numpy[i, 1])
+
+            names = self.grid_cell_op.get_surrounding_obstacle_names_cached(
+                x, y, radius=self.grid_radius, grid_size=60
+            )
+            # (n_obs_i, 4, 2, 2) – ogni ostacolo ha 4 spigoli (due punti 2D)
+            obs_i = self.grid_cell_op.obstacles_for_names(names)
+
+            if obs_i.size == 0:
+                continue  # lascia NaN (HSFM dovrebbe ignorarli con il check isnan)
+
+            # clip a massimo M ostacoli
+            n = min(obs_i.shape[0], M)
+            # se qualche mesh avesse <E spigoli, pad fino a E
+            if obs_i.shape[1] < E:
+                pad_edges = np.full((obs_i.shape[0], E - obs_i.shape[1], 2, 2), np.nan, dtype=np.float32)
+                obs_i = np.concatenate([obs_i, pad_edges], axis=1)
+            elif obs_i.shape[1] > E:
+                obs_i = obs_i[:, :E]
+
+            out[i, :n, :, :, :] = obs_i[:n]
+
+        return jnp.array(out, dtype=jnp.float32)  # (H, 10, 4, 2, 2)
+
+
+
+
+
     
     def _reset_episode_counters(self):
-        """Reset all episode-related counters."""
+        """Reset all episode-related counters at the beginning of the entire TRAINING"""
         self.current_step = 0
         self.episode_count = 0
         self.success_count = 0
@@ -234,8 +271,12 @@ class hamrrln(mobilerobotRL):
         self.step_time_measure = 0
         self.robot_action_period = 0.0
 
-        self.progress_reward_scale_initial = 5.0
+        self.progress_reward_scale_initial = 2.0
         self.progress_reward_scale_final = 0.03
+        self.progress_reward_term = 0.0
+        self.progress_orientation_smoothness_term = 0.0
+
+        self.laser_reward_term = 0.0    
 
         self.last_step_real_time = 0
         self.accumulated_sim_time = 0
@@ -259,6 +300,8 @@ class hamrrln(mobilerobotRL):
         self.robot_velocity_body = np.zeros(2, dtype=np.float32)  # [vx, vy]
         self.robot_theta = 0.0  # Robot orientation in radians
 
+        self._theta_hist = deque(maxlen=THETA_HIST_LENGTH)
+
     def _initialize_observation_stacking(self):
         """Initialize observation stacking components."""
         # Initialize deque to store lidar observations with fixed length
@@ -281,40 +324,34 @@ class hamrrln(mobilerobotRL):
         
         # Observation space depends on stacking mode
         if self.enable_stacking:
-            # Stacked observations: [stacked_lidar_readings, stacked_distance_and_angle]
+            # Stacked observations: [stacked_lidar_readings, stacked_distance_and_angle, previous_action]
             stacked_lidar_size = self.num_rays * self.n_stacking
             stacked_polar_size = 2 * self.n_stacking  # distance and angle, each stacked n_stacking times
             
+            #action_size = 2  # previous linear and angular velocity
+            
+            # Before: [lidar] + [distances] + [angles]
+            # After:  [distances] + [angles] + [lidar]  ← matches _get_obs
             obs_low = np.concatenate([
-                np.zeros(stacked_lidar_size, dtype=np.float32),  # stacked lidar readings
-                np.concatenate([
-                    np.zeros(self.n_stacking, dtype=np.float32),     # stacked distances
-                    np.full(self.n_stacking, -np.pi, dtype=np.float32)  # stacked angles
-                ])
+                np.zeros(self.n_stacking, dtype=np.float32),                 # distances
+                np.full(self.n_stacking, -np.pi, dtype=np.float32),          # angles
+                np.zeros(stacked_lidar_size, dtype=np.float32),              # lidar
             ])
-            
             obs_high = np.concatenate([
-                np.full(stacked_lidar_size, 200.0, dtype=np.float32),  # stacked lidar readings
-                np.concatenate([
-                    np.full(self.n_stacking, 200.0, dtype=np.float32),  # stacked distances
-                    np.full(self.n_stacking, np.pi, dtype=np.float32)   # stacked angles
-                ])
+                np.full(self.n_stacking, 200.0, dtype=np.float32),           # distances
+                np.full(self.n_stacking,  np.pi, dtype=np.float32),          # angles
+                np.full(stacked_lidar_size, 200.0, dtype=np.float32),        # lidar
             ])
+
             
-            total_obs_size = stacked_lidar_size + stacked_polar_size
+            total_obs_size = stacked_lidar_size + stacked_polar_size #+ action_size
         else:
-            # Non-stacked observations: [lidar_readings, distance, angle]
-            obs_low = np.concatenate([
-                np.zeros(self.num_rays, dtype=np.float32),  # lidar readings
-                np.array([0.0, -np.pi], dtype=np.float32)   # distance and angle
-            ])
-            
-            obs_high = np.concatenate([
-                np.full(self.num_rays, 200.0, dtype=np.float32),  # lidar readings
-                np.array([200.0, np.pi], dtype=np.float32)        # distance and angle
-            ])
-            
-            total_obs_size = self.num_rays + 2
+            obs_low  = np.concatenate([np.array([0.0, -np.pi], dtype=np.float32),
+                                    np.zeros(self.num_rays, dtype=np.float32)])
+            obs_high = np.concatenate([np.array([200.0,  np.pi], dtype=np.float32),
+                                    np.full(self.num_rays, 200.0, dtype=np.float32)])
+            total_obs_size = 2 + self.num_rays
+
         
         self.observation_space = gym.spaces.Box(
             low=obs_low,
@@ -344,35 +381,28 @@ class hamrrln(mobilerobotRL):
 
     def reset(self, seed: Optional[int] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset the environment to initial state."""
-        # Move robot position to (-2, -2)
         
-
-
-
-        # Update episode statistics from previous episode
-        if not self.training:
-            #print(f"Episode return: {self.episode_return:.2f}")
-            #print(f"Episode terminated after {self.current_step} steps or {self.current_step*self.robot_dt:.2f} SIMULATED seconds.")
-            #print(f"Episode terminated after {self.robot_episode_steps} ROBOT steps or {self.robot_episode_steps*self.robot_dt:.2f} SIMULATED seconds."
-            if self.episode_time > 0:
-                elapsed_time = time.time() - self.start_time
+        
         self._update_episode_stats()
 
-
-
-
-        # Reset episode variables
         self.episode_count += 1
         self.current_step = 0
-        self.previous_distance = 70.0
         self.episode_time_begin = time.time()
+
         self.episode_time = 0.0 
+        self.episode_return = 0.0   
         self.last_episode_result = None
         self.relative_angle = 0.0
         self.robot_action_counter = 0 
         self.robot_episode_steps = 0
         self.robot_action_period = time.time()  # Reset action period timer, periodo tra un'azione e l'altra
         self.human_update_counter = 0
+        self.progress_reward_term = 0.0
+        self.laser_reward_term = 0.0
+        self.progress_orientation_smoothness_term = 0.0
+
+        # Reset previous action for smooth velocity tracking
+        #self.previous_action = np.zeros(2, dtype=np.float32)
 
         # Save current position and orientation as reference for velocity computation
         robot_id = self.mobile_robot_ID
@@ -405,6 +435,10 @@ class hamrrln(mobilerobotRL):
         self.robot_theta = scenario_data["mob_robot_start_orientation"]
         self.data.qpos[:3] = [self.robot_pos[0], self.robot_pos[1], self.robot_theta]
 
+        self._theta_hist.clear()
+        for _ in range(THETA_HIST_LENGTH):
+            self._theta_hist.append(self.robot_theta)
+
         
         # Initialize humans state tracking
         self._initialize_humans_tracking()
@@ -431,6 +465,7 @@ class hamrrln(mobilerobotRL):
         self.polar_stack.clear()
 
         initial_robot_distance, initial_relative_angle, initial_lidar = self._get_state()  # Get initial state
+        self.previous_distance = float(initial_robot_distance)
 
         for _ in range(self.n_stacking):
             self.lidar_stack.append(initial_lidar.copy())
@@ -438,6 +473,7 @@ class hamrrln(mobilerobotRL):
         empty_polar = np.array([initial_robot_distance, initial_relative_angle], dtype=np.float32)
         for _ in range(self.n_stacking):
             self.polar_stack.append(empty_polar.copy())
+
     
     def _update_lidar_stack(self, new_lidar_reading: np.ndarray):
         """Update the lidar stack with new reading."""
@@ -580,21 +616,10 @@ class hamrrln(mobilerobotRL):
         
     def _get_state(self) -> np.ndarray:
         """Get the current state of the environment."""
-        # Get robot position and orientation
-        """Get current observation with [goal info | distances | angles | lidar stack]."""
-        #info = self._get_info()
-
-
-        # Get current lidar readings
-        current_lidar = np.zeros(self.num_rays, dtype=np.float32)
-        for i, sensor_id in enumerate(self.lidar_sensor_ids):
-            if sensor_id >= 0:
-                current_lidar[i] = round(self.data.sensordata[sensor_id], 2)
-            else:
-                raise ValueError(f"⚠️ Invalid sensor ID for lidar_{i}: {sensor_id}")
-
-
-
+        sensor_ids = np.asarray(self.lidar_sensor_ids, dtype=np.int32)
+        #if (self.current_step%3) == 0:
+        current_lidar = np.asarray(self.data.sensordata[sensor_ids], dtype=np.float32)
+            
         # --- GOAL INFO ---
         delta = self.target_pos[:2] - self.robot_pos[:2]
         distance_to_target = np.linalg.norm(delta)
@@ -675,17 +700,34 @@ class hamrrln(mobilerobotRL):
 
         # Step MuJoCo physics
         mujoco.mj_step(self.model, self.data)
+        self._theta_hist.append(float(self.robot_theta))
+
+        
+        # Update previous action for next observation
+        # if not hasattr(self, 'previous_action'):
+        #     self.previous_action = np.zeros(2, dtype=np.float32)
+        # self.previous_action = action.copy()
 
         # Get observation and info
         info = self._get_info()
         observation = self._get_obs(info)
 
         # Reward, done, truncated
-        reward, terminated, truncated = self._calculate_reward_and_termination(info, self.episode_time, observation, prev_obs)
-        self.episode_return += reward
+        if DEBUG:
+            step_reward, terminated, truncated, progress_reward_term, laser_reward_term, theta_smoothness_term = self._calculate_reward_and_termination(info, self.episode_time, observation, prev_obs)
+        else:
+            step_reward, terminated, truncated = self._calculate_reward_and_termination(info, self.episode_time, observation, prev_obs)
+        self.episode_return += step_reward
         info["episode_result"] = self.last_episode_result
+        if terminated or truncated:
+            
+            if DEBUG:
+                print(f"Episode return: {self.episode_return}")
+                print(f"Progress reward term: {progress_reward_term}")
+                print(f"Laser reward term: {laser_reward_term}")
+                print(f"Theta smoothness term: {theta_smoothness_term}")
 
-        return observation, reward, terminated, truncated, info
+        return observation, step_reward, terminated, truncated, info
 
 
 
@@ -727,11 +769,16 @@ class hamrrln(mobilerobotRL):
         # Get lidar stack
         lidar_stack = self._get_stacked_lidar_obs()  # shape: (n_stacking * num_rays,)
 
-        # Final obs: [goal info] + [distances] + [angles] + [lidar]
+        # Get previous action (initialize to zero if not available)
+        # if not hasattr(self, 'previous_action'):
+        #     self.previous_action = np.zeros(2, dtype=np.float32)
+
+        # Final obs: [distances] + [angles] + [lidar] + [previous_action]
         observation = np.concatenate([
             stacked_distances,
             stacked_angles,
             lidar_stack,
+            #self.previous_action.copy()  # Add previous action to observations
         ]).astype(np.float32)     
 
         return observation
@@ -761,7 +808,8 @@ class hamrrln(mobilerobotRL):
         
         return {
             "distance_to_sphere": distance_to_sphere,
-            "robot_position": self.robot_pos.copy(),
+            #"robot_position": self.robot_pos.copy(),
+            "robot_position": np.array([self.robot_pos[0], self.robot_pos[1], float(self.robot_theta)], dtype=np.float32),
             "target_position": self.target_pos.copy(),
             "success_rate": self.success_rate,
             "collision_rate": self.collision_rate,
@@ -772,6 +820,15 @@ class hamrrln(mobilerobotRL):
             "total_observation_size": self.n_stacking * self.num_rays + self.n_stacking * 2,  # lidar + polar data
             "scenario_id": self.current_scenario_id,
         }
+    
+    def _collision_detection(self, current_lidar):
+        
+        if np.min(current_lidar) <= 0.2:
+            if DEBUG:
+                print(f"Min LIDAR: {np.min(current_lidar):.3f}")
+            return True
+
+        return False
     
     def _apply_robot_action(self, action: np.ndarray, dt=ROBOT_DT):
         """Apply robot action using optimized kinematics."""
@@ -843,16 +900,28 @@ class hamrrln(mobilerobotRL):
                 self.data.qpos[2] -= rotation_step
             
             
-
         
     
     def _update_humans_simulation(self, action):
         """Update humans simulation using HSFM, optionally including robot in the simulation during testing."""
 
-        if not self.all_obstacles:
-            # Dynamic obstacle detection (less efficient)
-            found_obstacles = self._get_obstacles_from_human_positions(self.humans_state_numpy)
-            self.obstacles = self._get_static_obstacles_formatted(found_obstacles)
+        # if not self.all_obstacles:
+        #     # Dynamic obstacle detection (less efficient)
+        #     found_obstacles = self._get_obstacles_from_human_positions(self.humans_state_numpy)
+        #     self.obstacles = self._get_static_obstacles_formatted(found_obstacles)
+
+        # --- costruisci ostacoli per-umano dalle 8 celle adiacenti ---
+        if self.use_grid_obstacles:
+            obstacles_agents = self._build_grid_obstacles_per_human()
+        else:
+            # fallback legacy: TUTTI gli ostacoli uguali per ogni umano (costoso)
+            if self.all_obstacles and self.obstacles is not None:
+                obstacles_agents = self.obstacles
+            else:
+                # vecchio metodo (I/O pesante) — sconsigliato
+                found = self._get_obstacles_from_human_positions(self.humans_state_numpy)
+                obstacles_agents = self._get_static_obstacles_formatted(found)
+
 
         # Update human goals if targets are reached
         self._update_human_goals()
@@ -873,8 +942,8 @@ class hamrrln(mobilerobotRL):
                 self.robot_theta = robot_theta  # save for use in humans_simulation
 
                 # Compute robot velocity (in global frame)
-                vx = (self.robot_pos[0] - self.prev_robot_pos[0]) / self.robot_dt
-                vy = (self.robot_pos[1] - self.prev_robot_pos[1]) / self.robot_dt
+                vx = (self.robot_pos[0] - self.prev_robot_pos[0]) / self.humans_dt
+                vy = (self.robot_pos[1] - self.prev_robot_pos[1]) / self.humans_dt
 
                 # Compute velocity in robot body frame
                 rot_matrix = np.array([
@@ -909,18 +978,24 @@ class hamrrln(mobilerobotRL):
                 ], axis=0)
 
                 # Ostacoli: aggiungi dummy per robot
-                obstacles_extended = jnp.concatenate([
-                    self.obstacles,
-                    self.obstacles[:1]
-                ], axis=0)
+                # obstacles_extended = jnp.concatenate([
+                #     self.obstacles,
+                #     self.obstacles[:1]
+                # ], axis=0)
 
-                
 
-                
+                # # Esegui passo JHSFM e scarta il robot
+                # humans_state_with_robot = step(
+                #     humans_state_extended,
+                #     goals_extended,
+                #     params_extended,
+                #     obstacles_extended,
+                #     self.humans_dt,
+                # )
 
-               
-
-                # Esegui passo JHSFM e scarta il robot
+                # ... costruzione humans_state_extended / goals / params ...
+                # Estendi anche gli ostacoli: per il robot duplichiamo una riga
+                obstacles_extended = jnp.concatenate([obstacles_agents, obstacles_agents[:1]], axis=0)
                 humans_state_with_robot = step(
                     humans_state_extended,
                     goals_extended,
@@ -928,6 +1003,7 @@ class hamrrln(mobilerobotRL):
                     obstacles_extended,
                     self.humans_dt,
                 )
+
 
                 # Apply robot action (NN output)
                 self._apply_robot_action(action, dt = 0.01)
@@ -940,7 +1016,8 @@ class hamrrln(mobilerobotRL):
                     humans_state_jax,
                     self.humans_current_goals,
                     self.human_parameters,
-                    self.obstacles,
+                    #self.obstacles,
+                    obstacles_agents,
                     self.humans_dt,
                 )
 
@@ -989,118 +1066,399 @@ class hamrrln(mobilerobotRL):
                 np.cos(half_angle), 0., 0., np.sin(half_angle)
             ]
 
-    def _calculate_reward_and_termination(self, info: Dict[str, Any], episode_time: float, obs, prev_obs) -> Tuple[float, bool, bool]:
-        """Calculate reward and check for termination conditions."""
-        reward = 0.0
-        terminated = False
-        truncated = False
+
+
+
+
+
+
+
+
+
+    def _ang_diff(self, a: float, b: float) -> float:
+        return np.arctan2(np.sin(a - b), np.cos(a - b))
+    
+    def _orientation_smoothness_penalty(self):
+        """
+        Penalizza dθ e ddθ usando solo lo storico di self.robot_theta.
+        Usa dt = self.robot_dt del controllo.
+        """
+        if not hasattr(self, "_theta_hist") or len(self._theta_hist) < 2:
+            return 0.0
+
+        dt = float(self.robot_dt)
+        lam_dtheta  = 0.05   # peso su velocità angolare stimata da θ
+        lam_ddtheta = 0.02   # peso su jerk/accelerazione angolare da θ
+
+        th = list(self._theta_hist)  # ...[-3], [-2], [-1]
+        dtheta = self._ang_diff(th[-1], th[-2]) / dt
+        penalty = -lam_dtheta * (dtheta ** 2)
+
+        if len(th) >= 3:
+            dtheta_prev = self._ang_diff(th[-2], th[-3]) / dt
+            ddtheta = (dtheta - dtheta_prev) / dt
+            penalty += -lam_ddtheta * (ddtheta ** 2)
+
+        penalty *= 0.3  # Apply a scaling factor
+        return float(penalty)
+    
+    def _lasers_reward(self, current_lidar) -> float:
+        """Check for collisions and apply proximity penalties."""
+        lidar_reward = 0.0
+        # for i in range(0, len(current_lidar)):
+        #     reading = current_lidar[i]
+            
+        #     if reading < LIDAR_THRESHOLD:
+        #         lidar_reward -= 0.01 * (LIDAR_THRESHOLD - reading) / (LIDAR_THRESHOLD - self.robot_radius)
+        min_lidar = np.min(current_lidar)
+        if min_lidar < LIDAR_THRESHOLD:
+            lidar_reward -= (LIDAR_THRESHOLD - min_lidar) / (LIDAR_THRESHOLD - self.robot_radius)
+
+        return lidar_reward
+
+    # def _calculate_reward_and_termination(self, info: Dict[str, Any], episode_time: float, obs, prev_obs) -> Tuple[float, bool, bool]:
+    #     """Calculate reward and check for termination conditions."""
+    #     step_reward = 0.0
+    #     terminated = False
+    #     truncated = False
+        
+    #     # Get current state
+    #     current_target_distance, current_relative_angle, current_lidar = self._get_state()
+    #     if DEBUG_DATA:
+    #         print(f"Distance to target: {current_target_distance:.2f}, Relative angle: {current_relative_angle:.2f}")
+    #         print(f"Lidar readings: {current_lidar}")
+
+    #     # IMMEDIATE COLLISION CHECK
+    #     collision_detected = self._collision_detection(current_lidar)
+    #     if collision_detected:
+    #         self.last_episode_result = "collision"
+    #         terminated = True
+    #         step_reward += -150
+    #         info["steps_taken"] = self.current_step
+    #         info["episode_time_length"] = self.episode_time
+    #         info["episode_result"] = "collision"
+    #         if not self.training:
+    #             print("\n\n")
+    #         if DEBUG:
+    #             return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
+    #         else:
+    #             return step_reward, terminated, truncated
+
+    #     # Adaptive progress step_reward scaling based on success rate
+    #     #success_rate = self.success_rate  # between 0 and 1
+    #     # if self.training:
+    #     #     adaptive_scale = (1 - success_rate) * self.progress_reward_scale_initial + success_rate * self.progress_reward_scale_final
+    #     #     progress_reward = adaptive_scale * (self.previous_distance - current_target_distance)
+    #     # else:
+    #     progress_reward = 0.06 * (self.previous_distance - current_target_distance)
+        
+    #     step_reward += progress_reward
+    #     self.previous_distance = current_target_distance
+        
+    #     angle_reward = -0.03*abs(current_relative_angle)
+    #     step_reward += angle_reward
+
         
 
-        # Unpack obs
-        current_lidar = obs[self.n_stacking*(2+self.num_rays-1):]  # current Lidar readings are the end of the observation array
-        # Get distance to target and relative angle
-        current_target_distance = obs[self.n_stacking-1]
-        current_relative_angle = obs[self.n_stacking*2-1]
-
-
-        previous_distance = prev_obs[self.n_stacking-1]
-
-        # current_target_distance = obs[0]  # First element is distance to target
-        # current_relative_angle = obs[1]  # Second element is relative angle
-        # current_lidar = obs[2:]  # Remaining elements are lidar readings
-
-        # previous_distance = prev_obs[0]  # First element of previous observation is distance to target
-
-
-        # Adaptive progress reward scaling based on success rate
-        success_rate = self.success_rate  # between 0 and 1
-        if self.training:
-            adaptive_scale = (1 - success_rate) * self.progress_reward_scale_initial + success_rate * self.progress_reward_scale_final
-            progress_reward = adaptive_scale * (previous_distance - current_target_distance)
-        else:
-            progress_reward = self.progress_reward_scale_final * (previous_distance - current_target_distance)
-
-        reward += progress_reward
-        self.previous_distance = current_target_distance
+    #     lidar_reward = self._lasers_reward(current_lidar)
         
-        angle_reward = -0.01*abs(current_relative_angle)
-        reward += angle_reward
+    #     step_reward += lidar_reward
 
-        #print(f"Progress reward: {progress_reward:.5f}, Angle reward: {angle_reward:.5f}")
 
-       
 
-        # if not self.training:
-        #    print(f"Distance to target: {distance_to_target:.2f}, Angle: {self.relative_angle:.2f}")
+    #     # THETA SMOOTHNESS
+    #     theta_smoothness_penalty = self._orientation_smoothness_penalty()
+    #     step_reward += theta_smoothness_penalty
+
+    #     if DEBUG:
+    #         self.progress_reward_term += progress_reward
+    #         self.laser_reward_term += lidar_reward
+    #         self.progress_orientation_smoothness_term += theta_smoothness_penalty
+
+    #     # Success check
+    #     if current_target_distance < DISTANCE_SUCCESS_THRESHOLD:
+    #         self.last_episode_result = "success"
+    #         terminated = True
+    #         step_reward += 200
+    #         info["steps_taken"] = self.current_step
+    #         info["episode_time_length"] = episode_time
+    #         info["episode_result"] = "success"
+    #         if not self.training:
+    #             print(f"\n\nTarget reached in {episode_time:.2f} seconds.")
+    #             pass
+    #         if DEBUG:
+    #             return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
+    #         else:
+    #             return step_reward, terminated, truncated
+
+    #     # Timeout check
+    #     if self.robot_action_counter*self.robot_dt > self.max_episode_time: # num_step*s/step = seconds per episode
+    #         self.last_episode_result = "timeout"
+    #         truncated = True
+    #         info["steps_taken"] = self.current_step
+    #         info["episode_time_length"] = self.episode_time
+    #         info["episode_result"] = "timeout"
+    #         if not self.training:
+    #             print(f"\n\nEpisode timeout after {self.episode_time:.2f} REAL seconds.")
+    #             pass
+    #         if DEBUG:
+    #             return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
+    #         else:
+    #             return step_reward, terminated, truncated
+
+    #     if DEBUG:
+    #         return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
+    #     else:
+    #         return step_reward, terminated, truncated
+
+    
+
+    
+
+    # def _calculate_speed_regulation_reward(self, current_lidar, current_action) -> float:
+    #     """Calculate reward that encourages slowing down near obstacles."""
+    #     # Get current linear velocity from action
+    #     current_linear_vel = current_action[0]  # Range [0, 1]
         
-        # Collision detection and penalty
-        collision_detected, rew_lasers = self._lasers_reward(reward, current_lidar)
-        reward += rew_lasers
+    #     # Find minimum distance to any obstacle
+    #     min_distance = np.min(current_lidar)
         
-        # Success check
-        if current_target_distance < DISTANCE_SUCCESS_THRESHOLD:
-            self.last_episode_result = "success"
-            terminated = True
-            reward += 200
-            info["steps_taken"] = self.current_step
-            info["episode_time_length"] = episode_time
-            info["episode_result"] = "success"
-            if not self.training:
-                print(f"Target reached in {episode_time:.2f} seconds.")
-                pass
-            return reward, terminated, truncated
+    #     # Dynamic speed limits based on proximity
+    #     if min_distance <= 0.8:
+    #         max_safe_speed = 0.2  # Very slow in danger zone
+    #         penalty_scale = 0.15
+    #     elif min_distance <= 1.5:
+    #         max_safe_speed = 0.4  # Moderate speed in caution zone
+    #         penalty_scale = 0.1
+    #     elif min_distance <= 3.0:
+    #         max_safe_speed = 0.7  # Still limit speed in approach zone
+    #         penalty_scale = 0.05
+    #     else:
+    #         max_safe_speed = 1.0  # Full speed when clear
+    #         penalty_scale = 0.0
         
-        # humans_collision_detected, _ = self.collision_detector.check_robot_human_collision_distance(
-        #     collision_threshold=ROBOT_RADIUS
-        # )
+    #     speed_reward = 0.0
+        
+    #     # Reward staying within safe speed limits
+    #     if current_linear_vel <= max_safe_speed:
+    #         # Small reward for staying within limits
+    #         speed_reward += 0.01
+    #     else:
+    #         # Penalty for exceeding safe speed
+    #         excess_speed = current_linear_vel - max_safe_speed
+    #         speed_reward -= penalty_scale * excess_speed
+        
+    #     # Bonus for optimal speed in each zone
+    #     if min_distance <= 0.8 and current_linear_vel <= 0.15:
+    #         speed_reward += 0.03  # Extra reward for being very careful in danger
+    #     elif 1.5 < min_distance <= 3.0 and 0.4 <= current_linear_vel <= 0.6:
+    #         speed_reward += 0.02  # Reward for good speed in moderate zone
+        
+    #     # Human proximity consideration
+    #     if hasattr(self, 'humans_state_numpy'):
+    #         robot_pos = self.robot_pos[:2]
+    #         human_positions = self.humans_state_numpy[:, :2]
+            
+    #         if len(human_positions) > 0:
+    #             min_human_distance = np.min(np.linalg.norm(human_positions - robot_pos[None, :], axis=1))
+                
+    #             if min_human_distance <= 1.2:  # Close to humans
+    #                 human_safe_speed = 0.25
+    #                 if current_linear_vel <= human_safe_speed:
+    #                     speed_reward += 0.02  # Reward for being careful around humans
+    #                 else:
+    #                     excess = current_linear_vel - human_safe_speed
+    #                     speed_reward -= 0.12 * excess  # Strong penalty for fast movement near humans
+        
+    #     return speed_reward
 
-        if collision_detected:
+    # def _calculate_smooth_velocity_reward(self) -> float:
+    #     """Reward smooth velocity changes to avoid jerky movements."""
+    #     if not hasattr(self, 'previous_action'):
+    #         self.previous_action = np.zeros(2, dtype=np.float32)
+    #         return 0.0
+        
+    #     # Calculate change in linear and angular velocity
+    #     linear_vel_change = abs(self.action[0] - self.previous_action[0])
+    #     angular_vel_change = abs(self.action[1] - self.previous_action[1])
+        
+    #     # Reward smaller changes (smoother movement)
+    #     smooth_reward = 0.0
+    #     smooth_reward -= 0.02 * linear_vel_change   # Penalize large linear velocity changes
+    #     smooth_reward -= 0.01 * angular_vel_change  # Penalize large angular velocity changes
+        
+    #     # Update previous action for next step
+    #     self.previous_action = self.action.copy()
+        
+    #     return smooth_reward
+
+
+
+    # --- utils (metti vicino ad altre util se preferisci) ---
+    def _safe_div(self, num: float, den: float, eps: float = 1e-8) -> float:
+        return float(num) / float(den + eps)
+
+    def _get_max_ang_vel(self) -> float:
+        # Usa una costante se già esiste altrove; altrimenti un fallback sensato
+        return float(getattr(self, "MAX_ANG_VEL_ROBOT", 1.5))
+
+
+    # --- LIDAR proximity reward (stabile e normalizzato) ---
+    def _lasers_reward(self, current_lidar) -> float:
+        """Penalty crescente quando l'ostacolo più vicino entra sotto soglia."""
+        min_lidar = float(np.min(current_lidar))
+        if min_lidar >= LIDAR_THRESHOLD:
+            return 0.0
+
+        # Normalizza la vicinanza in [0,1]: 0 = sicuro, 1 = a contatto col raggio robot
+        denom = max(1e-6, (LIDAR_THRESHOLD - float(self.robot_radius)))  # epsilon
+        proximity = np.clip((LIDAR_THRESHOLD - min_lidar) / denom, 0.0, 1.0)
+        # Peso lidar (tuning): 1.0 dà segnali chiari ma non devastanti
+        w_lidar = 1.0
+        return -w_lidar * float(proximity)
+
+
+    # --- Smoothness su θ con normalizzazione fisica ---
+    def _orientation_smoothness_penalty(self) -> float:
+        """
+        Penalizza variazioni veloci di orientazione (dθ) e jerk (ddθ),
+        normalizzando rispetto al limite fisico di vel. angolare.
+        """
+        if not hasattr(self, "_theta_hist") or len(self._theta_hist) < 2:
+            return 0.0
+
+        dt = float(self.robot_dt)
+        th = list(self._theta_hist)  # [..., θ_{t-2}, θ_{t-1}, θ_t]
+        max_w = self._get_max_ang_vel()
+
+        # dθ_t (rad/s)
+        dtheta_t = self._ang_diff(th[-1], th[-2]) / dt
+        dtheta_n = dtheta_t / (max_w + 1e-8)
+
+        penalty = 0.0
+        lam_d, lam_dd = 0.02, 0.01  # pesi moderati e interpretabili
+
+        penalty += -lam_d * (dtheta_n ** 2)
+
+        if len(th) >= 3:
+            dtheta_tm1 = self._ang_diff(th[-2], th[-3]) / dt
+            ddtheta_t = (dtheta_t - dtheta_tm1) / dt           # rad/s^2
+            ddtheta_n = ddtheta_t / (max_w / max(dt, 1e-8))    # normalizza rispetto alla scala fisica
+            penalty += -lam_dd * (ddtheta_n ** 2)
+
+        # Clip prudente per evitare outlier rari (es. spawn / teletrasporti)
+        return float(np.clip(penalty, -0.3, 0.0))
+
+
+    # --- Reward principale e terminazioni ---
+    def _calculate_reward_and_termination(self, info: Dict[str, Any], episode_time: float, obs, prev_obs):
+        step_reward = 0.0
+        terminated, truncated = False, False
+
+        # Stato corrente
+        current_target_distance, current_relative_angle, current_lidar = self._get_state()  # :contentReference[oaicite:0]{index=0}
+
+        # 1) Collisione immediata
+        if self._collision_detection(current_lidar):
             self.last_episode_result = "collision"
             terminated = True
-            reward += -100
+            step_reward += -70.0
             info["steps_taken"] = self.current_step
             info["episode_time_length"] = self.episode_time
             info["episode_result"] = "collision"
-            return reward, terminated, truncated
-        
-        # Timeout check
-        if self.robot_action_counter*self.robot_dt > self.max_episode_time:
+            if DEBUG:
+                # inizializza termini se non presenti
+                if not hasattr(self, "progress_reward_term"): self.progress_reward_term = 0.0
+                if not hasattr(self, "laser_reward_term"): self.laser_reward_term = 0.0
+                if not hasattr(self, "progress_orientation_smoothness_term"): self.progress_orientation_smoothness_term = 0.0
+                if not hasattr(self, "angle_reward_term"): self.angle_reward_term = 0.0
+                return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
+            return step_reward, terminated, truncated
+
+        # 2) Progress (normalizzato e stabile)
+        # Opzione adattiva clampata (se vuoi mantenerla)
+        if self.training:
+            sr = float(getattr(self, "success_rate", 0.0))
+            s0 = float(getattr(self, "progress_reward_scale_initial", 0.04))
+            s1 = float(getattr(self, "progress_reward_scale_final",   0.08))
+            adaptive_scale = np.clip((1 - sr) * s0 + sr * s1, 0.02, 0.12)
+            progress_reward = adaptive_scale * (float(self.previous_distance) - float(current_target_distance))
+        else:
+            progress_reward = 0.06 * (float(self.previous_distance) - float(current_target_distance))
+
+        # Clip per-step per evitare spike (es. spawn vicino al goal)
+        progress_reward = float(np.clip(progress_reward, -0.2, 0.2))
+        step_reward += progress_reward
+
+        # 3) Allineamento angolare (normalizzato su π)
+        angle_norm = abs(float(current_relative_angle)) / np.pi  # in [0,1]
+        angle_reward = -0.05 * angle_norm
+        angle_reward = float(np.clip(angle_reward, -0.1, 0.0))
+        step_reward += angle_reward
+
+        # 4) LIDAR proximity (già normalizzato)
+        lidar_reward = self._lasers_reward(current_lidar)
+        lidar_reward = float(np.clip(lidar_reward, -1.0, 0.0))
+        step_reward += lidar_reward
+
+        # 5) Smoothness orientazionale (θ)
+        theta_smoothness_penalty = self._orientation_smoothness_penalty()
+        theta_smoothness_penalty = float(np.clip(theta_smoothness_penalty, -0.3, 0.0))
+        step_reward += theta_smoothness_penalty
+
+        # (Opzionale) Speed regulation: riattivalo solo se usi velocità già scalate in m/s
+        # speed_reward = self._calculate_speed_regulation_reward(current_lidar, current_action=<lin vel in m/s>)
+        # step_reward += np.clip(speed_reward, -0.1, 0.05)
+
+        # 6) Success
+        if current_target_distance <= ROBOT_RADIUS:
+            #print(current_target_distance)
+            self.last_episode_result = "success"
+            terminated = True
+            step_reward += 200.0
+            info["steps_taken"] = self.current_step
+            info["episode_time_length"] = episode_time
+            info["episode_result"] = "success"
+            # aggiorna previous_distance solo a fine step/terminazione
+            self.previous_distance = float(current_target_distance)
+            if DEBUG:
+                if not hasattr(self, "angle_reward_term"): self.angle_reward_term = 0.0
+                self.progress_reward_term += progress_reward
+                self.laser_reward_term += lidar_reward
+                self.progress_orientation_smoothness_term += theta_smoothness_penalty
+                self.angle_reward_term += angle_reward
+                return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
+            return step_reward, terminated, truncated
+
+        # 7) Timeout (misurato in sim-time)
+        if self.robot_action_counter * self.robot_dt > self.max_episode_time:
             self.last_episode_result = "timeout"
             truncated = True
             info["steps_taken"] = self.current_step
             info["episode_time_length"] = self.episode_time
             info["episode_result"] = "timeout"
-            if not self.training:
-                print(f"Episode timeout after {self.episode_time:.2f} REAL seconds.")
-                pass
-            return reward, terminated, truncated
-        
+            self.previous_distance = float(current_target_distance)
+            if DEBUG:
+                if not hasattr(self, "angle_reward_term"): self.angle_reward_term = 0.0
+                self.progress_reward_term += progress_reward
+                self.laser_reward_term += lidar_reward
+                self.progress_orientation_smoothness_term += theta_smoothness_penalty
+                self.angle_reward_term += angle_reward
+                return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
+            return step_reward, terminated, truncated
 
-        
-        
-        
-        return reward, terminated, truncated
-    
-    def _lasers_reward(self, base_reward: float, current_lidar) -> bool:
-        """Check for collisions and apply proximity penalties."""
-        collision_detected = False
-        base_reward = 0
-        for i in range(0, len(current_lidar)):
-            reading = current_lidar[i]
-            collision_threshold = ROBOT_RADIUS
-            
-            if reading < LIDAR_THRESHOLD and reading > self.robot_radius: #0.4
-                # Close to obstacle - apply penalty
-                base_reward -= 0.1
-            elif reading <= collision_threshold:
-                # Collision detected
-                collision_detected = True
-                return collision_detected, base_reward
-        
-        return collision_detected, base_reward
+        # 8) Aggiorna previous_distance SOLO qui (episodio continua)
+        self.previous_distance = float(current_target_distance)
 
+        if DEBUG:
+            if not hasattr(self, "angle_reward_term"): self.angle_reward_term = 0.0
+            self.progress_reward_term += progress_reward
+            self.laser_reward_term += lidar_reward
+            self.progress_orientation_smoothness_term += theta_smoothness_penalty
+            self.angle_reward_term += angle_reward
+            return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
 
-
+        return step_reward, terminated, truncated
 
 
 
@@ -1204,8 +1562,6 @@ class hamrrln(mobilerobotRL):
     
     def render(self, mode: str = 'human') -> bool:
         """Render the environment."""
-        if self.training:
-            return False
         
         if self.viewer is None:
             self._setup_viewer()
@@ -1238,13 +1594,16 @@ class hamrrln(mobilerobotRL):
             "stacked_polar_size": stacked_polar_size,
             "total_observation_size": stacked_lidar_size + stacked_polar_size,
             "observation_structure": {
-                "stacked_lidar": f"indices 0 to {stacked_lidar_size - 1}",
-                "stacked_distances": f"indices {stacked_lidar_size} to {stacked_lidar_size + self.n_stacking - 1}",
-                "stacked_angles": f"indices {stacked_lidar_size + self.n_stacking} to {stacked_lidar_size + stacked_polar_size - 1}"
+                "stacked_distances": f"indices 0 to {self.n_stacking - 1}",
+                "stacked_angles":    f"indices {self.n_stacking} to {2*self.n_stacking - 1}",
+                "stacked_lidar":     f"indices {2*self.n_stacking} to "
+                                    f"{2*self.n_stacking + self.n_stacking * self.num_rays - 1}",
             },
             "lidar_stack_info": {
-                "oldest_frame": f"indices 0 to {self.num_rays - 1}",
-                "newest_frame": f"indices {(self.n_stacking - 1) * self.num_rays} to {self.n_stacking * self.num_rays - 1}"
+                "oldest_frame": f"indices {2*self.n_stacking} to {2*self.n_stacking + self.num_rays - 1}",
+                "newest_frame": f"indices "
+                    f"{2*self.n_stacking + (self.n_stacking - 1) * self.num_rays} to "
+                    f"{2*self.n_stacking + self.n_stacking * self.num_rays - 1}",
             },
             "polar_stack_info": {
                 "distances": f"shape ({self.n_stacking},) - oldest to newest",

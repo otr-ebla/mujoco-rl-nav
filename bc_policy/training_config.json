@@ -1,0 +1,20 @@
+{
+  "data_path": "expert_data/expert_data.npz",
+  "best_val_loss": 0.11516224943539675,
+  "samples": 86362,
+  "policy_kwargs": {
+    "net_arch": {
+      "pi": [
+        128,
+        128
+      ],
+      "vf": [
+        128,
+        128
+      ]
+    }
+  },
+  "n_stacking": 10,
+  "num_rays": 108,
+  "timestamp": "20250905_110318"
+}

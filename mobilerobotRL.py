@@ -64,7 +64,7 @@ class mobilerobotRL(gym.Env):
             # Create sensor site (positioned 0.3m from center to avoid self-collisions)
             site = ET.SubElement(mobile_robot_body, 'site')
             site.set('name', f"lidar_site_{i}")
-            site.set('pos', f"{0.3 * np.cos(angle)} {0.3 * np.sin(angle)} 0")  # 30cm from center
+            site.set('pos', f"{0.001 * np.cos(angle)} {0.001 * np.sin(angle)} 0")  # 1mm from center
             site.set('size', "0.01")  # Visual size
             site.set('rgba', "1 0 0 0.5")  # Semi-transparent red
             site.set('zaxis', f"{np.cos(angle)} {np.sin(angle)} 0")  # Pointing direction

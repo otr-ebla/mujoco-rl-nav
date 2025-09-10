@@ -13,19 +13,30 @@ import argparse
 import xml.etree.ElementTree as ET
 import os
 import torch, pickle
-from assets.custom_callback import RewardCallback
-from HAMRRLN import hamrrln, N_HUMANS
+from torch import nn
+from assets.custom_callback import RewardCallback, GPUStatsCallback
+
+#from HAMRRLN import hamrrln
+#from actionHAMRRLN import actionhamrrln as hamrrln
+#from HAMRRLN import hamrrln
+from lightHAMRRLN import light_hamrrln as hamrrln
+
 from stable_baselines3.common.callbacks import BaseCallback
 from assets.custompolicy import TanhActorCriticPolicy
 from stable_baselines3.common.policies import ActorCriticPolicy
 
-from IL_HAMRRLN import NUM_RAYS, N_STACKING
+from env_config import NUM_RAYS, N_STACKING, N_HUMANS
 import logging
 from assets.train_classes import ScenarioSuccessCallback, PolicySaveCallback, RenderCallback
 
 import os
 os.environ['JAX_PLATFORMS'] = 'cpu'
-
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")   # usa la GPU 0 (quella senza GUI)
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("PYTORCH_NUM_THREADS", "1")
 # ============
 # Logging Setup
 # ============
@@ -56,7 +67,7 @@ def _safe_save(model, env, run_id, log_dir, suffix="interrupt"):
 
 
 
-def make_env(num_rays, model_path="assets/world.xml", training = True, n_humans = 5, render_mode=None, n_stacking = 10, stacking=True):
+def make_env(num_rays, model_path="assets/world.xml", training = True, n_humans = N_HUMANS, render_mode=None, n_stacking = 10, stacking=True):
     def _init():
         env = hamrrln(
             num_rays=num_rays, 
@@ -117,7 +128,10 @@ def train_agent(num_rays,
 
         # STANDARD RL TRAINING ENVS
         else:        # Create multiple parallel environments
-            env = SubprocVecEnv([make_env(num_rays, model_path, training=training) for _ in range(num_envs)])
+            env = SubprocVecEnv(
+                [make_env(num_rays, model_path, training=training) for _ in range(num_envs)],
+                start_method="forkserver"
+            )
         env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
  
@@ -255,86 +269,160 @@ def train_agent(num_rays,
     # --- Standard RL Training Setup ---
 
     else:
+        # --- PPO (tighter, more on-policy) ---
         if trainer == "PPO" or trainer == "ppo":
-            # Create PPO model with built-in logging
+            policy_kwargs = dict(
+                net_arch=[256, 256, 128],
+                activation_fn=nn.Tanh,
+                ortho_init=True,
+                log_std_init=-1.0,
+            )
+
+            # With many envs, prefer shorter rollouts & more epochs
             model = PPO(
                 policy="MlpPolicy",
                 env=env,
                 tensorboard_log=log_dir,
-                learning_rate=3e-4,
-                device = "cpu",
-                n_steps=2048,
-                batch_size=128,
-                n_epochs=10,
-                gamma=0.99,
+                device="cpu",
+                learning_rate=3e-4,          # a hair higher speeds converge
+                n_steps=256,                  # ↓ from 512 → fresher data
+                batch_size= min(8192, 36*256),# big but not huge batches
+                n_epochs=10,                  # ↑ from 4 → better fit per batch
+                gamma=0.995,                  # slightly longer credit assignment
                 gae_lambda=0.95,
+                use_sde=True,
+                sde_sample_freq=1,            # resample each step for smoother noise
                 clip_range=0.2,
-                ent_coef=0.01,
+                clip_range_vf=0.2,
+                ent_coef=0.001,               # a touch of exploration, less than 0.003
                 vf_coef=0.5,
                 max_grad_norm=0.5,
+                target_kl=0.03,               # relax a bit to prevent premature stop
+                policy_kwargs=policy_kwargs,
                 verbose=1,
             )
             trainer_name = "PPO"
-            
-        elif trainer == "SAC":
-            model = SAC(
-                "MlpPolicy",
-                env,
-                verbose=1,
-                tensorboard_log=log_dir,
-                device="cuda" if torch.cuda.is_available() else "cpu",
-                learning_rate=0.0001,    # Kept same
-                buffer_size=1000000,     # Kept same
-                learning_starts=5000,    # Increased from 1000
-                batch_size=1024,          # Increased from 256
-                tau=0.01,               # Increased from 0.005
-                gamma=0.99,             # Kept same
-                train_freq=1,           # Kept same
-                gradient_steps=1,       # Kept same
-                ent_coef="auto",        # Kept same
-                policy_kwargs=policy_kwargs
-            )
-            trainer_name = "SAC"
 
-        elif trainer == "TD3":
-            model = TD3(
-                "MlpPolicy",
-                env,
-                verbose=1,
+
+
+
+
+
+
+
+
+
+
+
+        elif trainer.lower() == "sac" or trainer == "SAC":
+            use_cuda = torch.cuda.is_available()
+            policy_kwargs = dict(
+                net_arch=dict(pi=[128, 128], qf=[128, 128]),
+                activation_fn=nn.ReLU,
+            )
+            model = SAC(
+                policy="MlpPolicy",
+                env=env,
+                device=("cuda" if use_cuda else "cpu"),
                 tensorboard_log=log_dir,
-                device="cuda" if torch.cuda.is_available() else "cpu",
-                learning_rate=0.0003,  # Reduced from 0.001
-                buffer_size=1000000,   # Kept same
-                learning_starts=20000,  
-                batch_size=1024,        # Reduced from 256
-                tau=0.005,            # Kept same
-                gamma=0.98,           # Slightly reduced from 0.99
-                #train_freq=(num_envs*100, "step"),    # Explicit step/epoch setting
-                policy_kwargs=dict(
-                    net_arch=[256, 256],
-                    #noise_std=0.2,
-                    #noise_clip=0.5
-                )
+                learning_rate=3e-4,
+                gamma=0.99,
+                tau=0.02,                 # slightly larger to converge with fewer target updates
+                buffer_size=200_000,      # ↓ RAM
+                batch_size=256,           # ↓ compute per update
+                train_freq=(16, "step"),  # update less often
+                gradient_steps=1,         # 1 gradient step per train call
+                learning_starts=10_000,   # shorter warmup to start learning earlier
+                ent_coef="auto_0.25",     # okay exploration, a bit cheaper to stabilize
+                target_update_interval=1, # fine with tau=0.02
+                policy_kwargs=policy_kwargs,
+                verbose=1,
+            )
+
+
+
+
+        elif trainer == "TD3" or trainer == "td3":
+            from stable_baselines3.common.noise import NormalActionNoise
+
+            use_cuda   = torch.cuda.is_available()
+            batch_size = 1024 if use_cuda else 512  # batch grande se la rete è su GPU
+
+            lin_sigma = 0.08
+            ang_sigma = 0.25
+            action_noise = NormalActionNoise(
+                mean=np.array([0.0, 0.0], dtype=np.float32),
+                sigma=np.array([lin_sigma, ang_sigma], dtype=np.float32)
+            )
+
+            # Reti un po’ più capienti per obs ~1100
+            policy_kwargs = dict(
+                net_arch=dict(pi=[256, 256, 128], qf=[256, 256, 128]),
+                activation_fn=nn.ReLU,   # Tanh va bene uguale; ReLU qui di solito è ok
+            )
+
+            model = TD3(
+                policy="MlpPolicy",
+                env=env,
+                tensorboard_log=log_dir,
+                device=("cuda" if use_cuda else "cpu"),
+                # Ottimizzazioni chiave
+                learning_rate=3e-4,       # attore+critici
+                buffer_size=2_000_000,    # grande (se RAM ok)
+                batch_size=batch_size,
+                gamma=0.99,
+                tau=0.005,                # soft target update
+                # Frequenze di training (off-policy)
+                train_freq=(1, "step"),   # allena a ogni step “globale” (su tutti gli env)
+                gradient_steps=1,         # aumenta a 2–4 se vuoi più lavoro GPU (occhio al replay ratio)
+                policy_delay=2,           # TD3 classico: attore più lento
+                # Policy smoothing per i target
+                
+                # Esplorazione iniziale
+                action_noise=action_noise,
+                learning_starts=20_000,   # warmup (con molti env arriva in fretta)
+                # Qualche miglioria pratica
+                verbose=1,
+                policy_kwargs=policy_kwargs,
             )
             trainer_name = "TD3"
 
-        elif trainer == "TQC":
+
+        elif trainer == "TQC" or trainer == "tqc":
+            use_cuda = torch.cuda.is_available()
+
+            # Rete adatta a obs ~1100
+            policy_kwargs = dict(
+                net_arch=dict(pi=[256, 256, 128], qf=[256, 256, 128]),
+                activation_fn=nn.ReLU,
+                n_critics=2,      # TQC: più critici → stima più robusta
+                n_quantiles=25,   # quantili per critico
+            )
+
+            # Attenzione alla RAM: buffer grande ma non enorme
+            buffer_size = 300_000
+            batch_size  = 512 if use_cuda else 256
+
             model = TQC(
-                "MlpPolicy",
-                env,
-                verbose=1,
+                policy="MlpPolicy",
+                env=env,
                 tensorboard_log=log_dir,
-                device="cuda" if torch.cuda.is_available() else "cpu",
-                learning_rate=0.0001,       # Balanced learning rate
-                batch_size=1024,            # Larger batch for stability
-                gamma=0.98,                # Good for mid-horizon tasks
-                tau=0.005,                 # Default target update rate
-                ent_coef="auto_0.01",    # Adaptive entropy coefficient
-                #n_quantiles=25,            # Default quantile count
-                #top_quantiles_to_drop=2,   # Default truncation
-                policy_kwargs=policy_kwargs
+                device=("cuda" if use_cuda else "cpu"),
+                learning_rate=3e-4,
+                buffer_size=buffer_size,
+                batch_size=batch_size,
+                train_freq=(1, "step"),       # aggiorna a ogni passo vettoriale
+                gradient_steps=1,             # ↑ a 2 se vuoi più lavoro GPU
+                learning_starts=20_000,
+                tau=0.005,
+                gamma=0.99,
+                #top_quantiles_to_drop_per_net=2,  # “truncated” dei quantili alti
+                #optimize_memory_usage=True,
+                policy_kwargs=policy_kwargs,
+                verbose=1,
             )
             trainer_name = "TQC"
+
 
         elif trainer == "A2C":
             model = A2C(
@@ -361,7 +449,7 @@ def train_agent(num_rays,
                 num_rays=num_rays, 
                 model_path=model_path, 
                 training=False,
-                n_humans=5,
+                n_humans=N_HUMANS,
                 n_stacking=n_stacking,  # Must match IL training
                 enable_stacking=stacking,
                 render_mode="human",  # For evaluation  
@@ -389,8 +477,11 @@ def train_agent(num_rays,
         else:
             raise ValueError(f"Unsupported trainer: {trainer}. Choose from PPO, SAC, TD3, TQC, or BC.")
 
-
-     
+    print("\n\n\n")
+    print("GPU disponibile:", torch.cuda.is_available())
+    print("Device policy SB3:", getattr(model.policy, "device", "N/A"))
+    print("Param device:", next(model.policy.parameters()).device)
+    print("\n\n\n")
     
     # Only keep necessary callbacks
     checkpoint_callback = CheckpointCallback(
@@ -404,7 +495,7 @@ def train_agent(num_rays,
 
 
 
-    callbacks = [checkpoint_callback, reward_callback, scenario_success_callback]
+    callbacks = [checkpoint_callback, reward_callback, scenario_success_callback, GPUStatsCallback(gpu_index=0, min_interval_s=10)]
     
 
     if render_training and num_envs == 1:
@@ -448,9 +539,6 @@ def train_agent(num_rays,
 
     
 if __name__ == "__main__":
-    # Optional: force CPU if CUDA/CuDNN errors persist
-    # import os
-    # os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
     parser = argparse.ArgumentParser(
         description="Train or evaluate RL agents in HAMR environment."
@@ -479,7 +567,7 @@ if __name__ == "__main__":
                         help="Number of stacked observations.")
     parser.add_argument("--CL", action="store_true",
                         help="Enable Curriculum Learning.")
-    parser.add_argument("--bc_path", type=str, default="bc_policy/",
+    parser.add_argument("--bc_path", type=str, default="bc_policy",
                         help="Path to the pre-trained BC policy model.")
     parser.add_argument("--render_training", action="store_true",
                         help="Render the training environment (single env only).")
@@ -497,7 +585,7 @@ if __name__ == "__main__":
             num_rays=args.num_rays,
             model_path=args.model_path,
             training=False,
-            n_humans=5,
+            n_humans=N_HUMANS,
             n_stacking=args.n_stacking,
             enable_stacking=stacking,
             render_mode="human",
@@ -541,11 +629,11 @@ if __name__ == "__main__":
             if not os.path.exists(f"{bc_policy_path}/best_policy.pt"):
                 print(f"❌ BC model file '{bc_policy_path}/best_policy.pt' not found!")
                 exit(1)
-            if not os.path.exists(f"{bc_policy_path}/training_config.pkl"):
-                print(f"❌ BC training config file '{bc_policy_path}/training_config.pkl' not found!")
+            if not os.path.exists(f"{bc_policy_path}/vec_normalize.pkl"):
+                print(f"❌ BC VecNormalize file '{bc_policy_path}/vec_normalize.pkl' not found!")
                 exit(1)
 
-            with open(f"{bc_policy_path}/training_config.pkl", "rb") as f:
+            with open(f"{bc_policy_path}/vec_normalize.pkl", "rb") as f:
                 policy_data = pickle.load(f)
             checkpoint = torch.load(f"{bc_policy_path}/best_policy.pt",
                                     map_location="cpu", weights_only=False)
@@ -578,7 +666,12 @@ if __name__ == "__main__":
                 policy_kwargs=policy_kwargs,
                 device="cpu"
             )
-            model.policy.load_state_dict(checkpoint['policy_state_dict'], strict=False)
+            if isinstance(checkpoint, dict) and "policy_state_dict" in checkpoint:
+                state_dict = checkpoint["policy_state_dict"]
+            else:
+                state_dict = checkpoint
+            model.policy.load_state_dict(state_dict, strict=False)
+
             print("✅ Loaded BC policy successfully.")
 
         else:
@@ -600,7 +693,12 @@ if __name__ == "__main__":
         #         done = terminated or truncated
         #         env.render()  # refresh MuJoCo viewer
 
-        mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=300, deterministic=True, render=True)
+        try:
+            mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=300, deterministic=True, render=True)
+        except KeyboardInterrupt:
+            print("\n⏹  CTRL+C detected — evaluation interrupted.")
+            eval_env.close()
+            exit(0)
 
 
         eval_env.close()

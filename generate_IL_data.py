@@ -40,47 +40,75 @@ def collect_expert_data(render_mode="human", save_path=None, total_steps=TOTAL_D
     current_episode = 0
     steps_collected = 0
 
+    episode_data = {
+        'observations': [],
+        'actions': [],
+        'rewards': [],
+        'dones': []
+    }
+
+    done = False
+    current_obs = env.reset()
+
     with tqdm(total=total_steps, desc="Collecting Expert Data") as pbar:
-        while steps_collected < total_steps:
-            obs = env.reset()
-            done = False
-            episode_data = {'observations': [], 'actions': [], 'rewards': [], 'dones': []}
-            current_obs = obs[0]
+        while not done and len(episode_data['observations']) < EPISODE_LENGTH:
+            prev_obs = current_obs.copy()
 
-            while not done and len(episode_data['observations']) < EPISODE_LENGTH:
-                expert_action = env.envs[0].get_true_robot_velocities()
-                expert_action_np = np.array(expert_action, dtype=np.float32).reshape(1, -1)
+            # step the env (IL env ignores the passed action and applies its own)
+            dummy = np.zeros((1, 2), dtype=np.float32)
+            obs, reward, done, infos = env.step(dummy)
 
-                episode_data['observations'].append(current_obs.copy())
-                episode_data['actions'].append(expert_action_np)
-
-                obs, reward, done, info = env.step(expert_action_np)
-                current_obs = obs[0]
-                episode_data['rewards'].append(reward[0])
-                episode_data['dones'].append(done[0])
-
-                pbar.update(1)
-                steps_collected += 1
-
-                if done[0] or len(episode_data['observations']) >= EPISODE_LENGTH:
-                    all_observations.extend(episode_data['observations'])
-                    all_actions.extend(episode_data['actions'])
-                    all_rewards.extend(episode_data['rewards'])
-                    all_dones.extend(episode_data['dones'])
-                    episode_lengths.append(len(episode_data['observations']))
-                    current_episode += 1
+            info0 = infos[0] if isinstance(infos, (list, tuple)) else infos
+            # Try a few common keys for the expert/HSFM command
+            expert = None
+            for k in ("expert_action", "true_action", "hsfm_action", "expert_cmd"):
+                if k in info0:
+                    expert = np.array(info0[k], dtype=np.float32).reshape(-1)
                     break
+            if expert is None:
+                # final fallback: try attributes if you expose them
+                try:
+                    env0 = env.envs[0]
+                    v_lin = float(getattr(env0, "robot_linear_velocity"))
+                    v_ang = float(getattr(env0, "robot_angular_velocity"))
+                    expert = np.array([v_lin, v_ang], dtype=np.float32)
+                except Exception:
+                    raise RuntimeError(
+                        "Expert action not found in info and no attribute fallback. "
+                        "Either emit info['expert_action'] in the env or add a helper method."
+                    )
+
+            # record (obs_t, a_t) where a_t is the action applied during this step
+            episode_data['observations'].append(prev_obs)
+            episode_data['actions'].append(expert)     # store as shape (2,)
+            episode_data['rewards'].append(reward[0])
+            episode_data['dones'].append(done[0])
+
+            current_obs = obs[0]
+            pbar.update(1)
+            steps_collected += 1
+
+            if done[0] or len(episode_data['observations']) >= EPISODE_LENGTH:
+                all_observations.extend(episode_data['observations'])
+                all_actions.extend(episode_data['actions'])
+                all_rewards.extend(episode_data['rewards'])
+                all_dones.extend(episode_data['dones'])
+                episode_lengths.append(len(episode_data['observations']))
+                current_episode += 1
+                break
+
 
     # Save dataset
     filename = save_path or os.path.join(DATA_DIR, "expert_data.npz")
     np.savez(
         filename,
         observations=np.stack(all_observations),
-        actions=np.stack(all_actions),
+        actions=np.stack(all_actions),       # <- each is (2,)
         rewards=np.array(all_rewards),
         dones=np.array(all_dones),
         episode_lengths=np.array(episode_lengths)
     )
+
 
     print("\n✅ Data collection complete:")
     print(f"- Episodes: {current_episode}")

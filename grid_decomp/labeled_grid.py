@@ -14,6 +14,129 @@ class GridCell_operations:
         self.half_world = world_size / 2
         self.static_obstacles = []
 
+        self.labeled_grid_dict = None
+        self.mesh_index = {}
+        self.max_edges_per_obstacle = 4
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # --- NEW: carica "labeled_grid_cleaned.txt" una volta ---
+    def load_labeled_grid_from_file(self, path):
+        d = {}
+        with open(path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or not line.startswith("Cell"):
+                    continue
+                head, labels = line.split(":", 1)
+                ij = head.replace("Cell", "").strip()
+                # tollera "i,j" o "i, j"
+                i_str, j_str = [s.strip() for s in ij.split(",")]
+                i, j = int(i_str), int(j_str)
+                labs = [s.strip() for s in labels.strip().split("|") if s.strip() and s.strip().lower() != "free"]
+                d[(i, j)] = labs
+        self.labeled_grid_dict = d
+
+    # --- NEW: indicizza "meshes.txt" una volta (name -> 4 vertici -> 4 edge) ---
+    def load_meshes_index(self, path):
+        self.mesh_index = {}
+        with open(path, 'r') as f:
+            lines = [ln.strip() for ln in f.readlines()]
+        i = 0
+        while i < len(lines):
+            ln = lines[i]
+            if ln.endswith(":"):
+                name = ln[:-1]
+                verts = []
+                for j in range(1, 5):
+                    if i + j < len(lines):
+                        x_str, y_str = [s.strip() for s in lines[i + j].split(",")]
+                        verts.append((float(x_str), float(y_str)))
+                if len(verts) == 4:
+                    edges = [
+                        (verts[0], verts[1]),
+                        (verts[1], verts[2]),
+                        (verts[2], verts[3]),
+                        (verts[3], verts[0]),
+                    ]
+                    # NIENTE flatten: edge = ((x1,y1),(x2,y2)) -> (2,2)
+                    self.mesh_index[name] = np.array(edges, dtype=np.float32)  # (4, 2, 2)
+                i += 4
+            i += 1
+
+    def obstacles_for_names(self, names):
+        """Return stacked obstacles as (n_obs, n_edges, 2, 2)."""
+        obs = []
+        for n in names:
+            e = self.mesh_index.get(n, None)  # e: (4,2,2)
+            if e is not None:
+                obs.append(e)
+        if not obs:
+            return np.zeros((0, 4, 2, 2), dtype=np.float32)
+        return np.stack(obs, axis=0)  # (n_obs, 4, 2, 2)
+
+
+    # --- NEW: query 8-neighbors sfruttando la cache ---
+    def get_surrounding_obstacle_names_cached(self, x, y, radius=1, grid_size=60):
+        if np.isnan(x) or np.isnan(y) or self.labeled_grid_dict is None:
+            return set()
+        center = self.world_to_grid(x, y, square_size=self.cell_size, grid_size=grid_size)
+        if center is None:
+            return set()
+        i0, j0 = center
+        found = set()
+        for di in range(-radius, radius + 1):
+            for dj in range(-radius, radius + 1):
+                key = (i0 + di, j0 + dj)
+                labs = self.labeled_grid_dict.get(key)
+                if labs:
+                    found.update(labs)
+        return found
+
+    # --- NEW: edges per insieme di nomi (no I/O, no accumulo stato) ---
+    # --- dentro edges_for_obstacle_names(...) ---
+    def edges_for_obstacle_names(self, names):
+        if not names:
+            return np.zeros((0, 2, 2), dtype=np.float32)  # (n_edges, 2, 2)
+        mats = [self.mesh_index[n] for n in names if n in self.mesh_index]  # ognuno (4,2,2)
+        if not mats:
+            return np.zeros((0, 2, 2), dtype=np.float32)
+        return np.concatenate(mats, axis=0)  # (num_edges, 2, 2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
     def parse_obstacle_file(self, filepath):
         with open(filepath, 'r') as f:
@@ -173,7 +296,8 @@ class GridCell_operations:
         static_obstacles = []
 
         try:
-            with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/meshes.txt', 'r') as f:
+            #with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/meshes.txt', 'r') as f:
+            with open('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/mesh_edges.txt', 'r') as f:
                 lines = f.readlines()
 
             i = 0
@@ -233,21 +357,23 @@ class GridCell_operations:
                 obstacle_names.append(obstacle_name)
         return obstacle_names
 
-# Call the function with the desired file path
-#plot_obstacles_from_file('/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt')
+# ESECUZIONE DELLO SCRIPT PER RIGENERARE labeled_grid_cleaned.txt
+# grid = GridCell_operations(cell_size=4, world_size=320)
 
-# grid = GridCell_operations(cell_size=10, world_size=320)
-# obstacles = grid.parse_obstacle_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt")  # sostituisci con il tuo path
-# labeled_grid = grid.label_grid(obstacles)
-# grid.write_labeled_grid_to_file(labeled_grid, "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid2.txt")
-# grid.clean_label_txt_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid2.txt", "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt")
+# # 2) leggi gli ostacoli dal file aggiornato (stesso formato di mesh_edges.txt)
+# #    Se usi proprio mesh_edges.txt, va bene anche parse_obstacle_file su quel file.
+# obstacles = grid.parse_obstacle_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/mesh_edges.txt")
 
-# Obstacles_names = ["Wall11", "Wall20"]
-# static_obstacles = grid.get_static_obstacles_formatted(Obstacles_names)
-# print(static_obstacles.shape)
-# print(static_obstacles)
-    
-# grid = GridCell_operations(cell_size=10, world_size=320)
-# obstacles_names = grid.get_obstacle_names_from_file("/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/boxes_2d_corners.txt")
-# static_obstacles = grid.get_static_obstacles_formatted(obstacles_names)
-# grid.plot_obstacles_from_static(static_obstacles)
+# # 3) crea la griglia etichettata
+# labeled = grid.label_grid(obstacles, world_size=320, square_size=4)
+
+# # 4) scrivi la griglia completa e poi la versione "pulita" (senza righe 'free')
+# grid.write_labeled_grid_to_file(
+#     labeled,
+#     "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid.txt"
+# )
+# grid.clean_label_txt_file(
+#     "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid.txt",
+#     "/home/alberto_vaglio/HumanAwareRLNavigation/grid_decomp/labeled_grid_cleaned.txt"
+# )
+# print("✅ labeled_grid_cleaned.txt rigenerato")

@@ -124,9 +124,15 @@ class PolicySaveCallback(BaseCallback):
         return True
     
 class RenderCallback(BaseCallback):
-    def __init__(self, verbose=0):
-        super().__init__(verbose)
-       
-    def _on_step(self) -> bool:
-        self.training_env.envs[0].render()  # Render the first environment  
+    def _on_step(self):
+        try:
+            env = self.model.get_env()
+            base = env
+            # un-wrap VecNormalize/VecEnvWrapper
+            while hasattr(base, "venv"):
+                base = base.venv
+            # ora base è DummyVecEnv
+            base.envs[0].render()
+        except Exception as e:
+            print("Render error:", e)
         return True

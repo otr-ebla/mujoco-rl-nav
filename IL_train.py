@@ -17,6 +17,10 @@ from IL_HAMRRLN import MAX_LIN_VEL_ROBOT, NUM_RAYS, N_STACKING
 from generate_IL_data import TOTAL_DATA_STEPS
 from lidarCNN_extractor import LidarCNNExtractor
 import matplotlib.pyplot as plt
+
+from torch.serialization import add_safe_globals
+
+
 plt.ion()  # turn on interactive plotting
 
 logging.basicConfig(
@@ -297,8 +301,8 @@ train_size = int(0.8 * len(dataset))
 val_size = len(dataset) - train_size
 train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=512, shuffle=False)
 
 # ============
 # Define Observation and Action Spaces
@@ -309,21 +313,7 @@ act_low = np.array([0.0, -1.0])
 act_high = np.array([1.0, 1.0])
 act_space = Box(low=act_low, high=act_high, dtype=np.float32)
 
-# Observation bounds (lidar + polar goal)
-# obs_low = np.concatenate([
-#     np.zeros(stacked_lidar_size, dtype=np.float32),
-#     np.concatenate([
-#         np.zeros(n_stacking, dtype=np.float32),        # distance
-#         np.full(n_stacking, -np.pi, dtype=np.float32)  # angle
-#     ])
-# ])
-# obs_high = np.concatenate([
-#     np.full(stacked_lidar_size, 200.0, dtype=np.float32),
-#     np.concatenate([
-#         np.full(n_stacking, 200.0, dtype=np.float32),
-#         np.full(n_stacking, np.pi, dtype=np.float32)
-#     ])
-# ])
+
 obs_low = np.concatenate([
     np.zeros(n_stacking, dtype=np.float32),
     np.full(n_stacking, -np.pi, dtype=np.float32),
@@ -348,34 +338,16 @@ policy = ActorCriticPolicy(
     action_space=act_space,
     lr_schedule=lambda _: 1e-4,
     **policy_kwargs,
-    # log_std_init=0.0,  # Initial log std = 0 -> std = 1
 )
 
-
-# policy_kwargs = {
-#     'features_extractor_class': LidarCNNExtractor,
-#     'features_extractor_kwargs': {
-#         'n_stacking': n_stacking,
-#         'num_rays': num_rays
-#     },
-#     'net_arch': dict(pi=[128, 128], vf=[128, 128])
-# }
-
-
-# policy = ActorCriticPolicy(
-#     observation_space=obs_space,
-#     action_space=act_space,
-#     lr_schedule=lambda _: 3e-4,
-#     **policy_kwargs,
-# )
 
 
 
 
 # --- Hyperparameters and setup ---
-optimizer = optim.Adam(policy.parameters(), lr=1e-3, weight_decay=1e-3)
+optimizer = optim.Adam(policy.parameters(), lr=2e-3, weight_decay=1e-5)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, mode='min', factor=0.5, patience=5, verbose=True,
+    optimizer, mode='min', factor=0.5, patience=6, 
 )
 loss_fn = nn.MSELoss()
 
@@ -572,7 +544,19 @@ class DummyEnv(gym.Env):
         return self.observation_space.sample(), 0.0, False, False, {}
 
 # ✅ Load best policy weights
-checkpoint = torch.load(os.path.join(save_dir, "best_policy.pt"))
+
+add_safe_globals([Box])
+
+ckpt_path = os.path.join(save_dir, "best_policy.pt")
+try:
+    checkpoint = torch.load(ckpt_path)
+except Exception:
+    checkpoint = torch.load(ckpt_path, weights_only=False)
+
+state_dict = checkpoint["policy_state_dict"] if (
+    isinstance(checkpoint, dict) and "policy_state_dict" in checkpoint
+) else checkpoint
+
 
 # Wrap dummy env with VecNormalize
 dummy_env = DummyEnv(obs_space, act_space)
@@ -586,7 +570,7 @@ sb3_model = PPO(
     policy_kwargs=policy_kwargs,
     device="cpu"
 )
-sb3_model.policy.load_state_dict(checkpoint["policy_state_dict"])
+sb3_model.policy.load_state_dict(state_dict)
 
 # Save final models
 sb3_model.save(os.path.join(save_dir, "bc_model.zip"))

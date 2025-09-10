@@ -5,6 +5,7 @@ import mujoco
 # lo useremo solo dentro _setup_viewer() se mai servirà.
 from mobilerobotRL import mobilerobotRL
 import os
+os.environ['JAX_PLATFORMS'] = 'cpu'
 import xml.etree.ElementTree as ET
 import time
 import random
@@ -15,37 +16,33 @@ import logging
 from collections import deque
 
 # Scenari
+# Scenari
 from scenarios import (
     scenario1, scenario1_easy, scenario2, scenario3, scenario4, scenario5,
     scenario6, scenario7, scenario8, scenario9, scenario10, scenario11,
-    scenario12, scenario1_nohumans
+    scenario12,
+    scenarioTEST1, scenarioTEST2, scenarioTEST3,   # NEW: match RL env
 )
+
+
 import jax.numpy as jnp
 from JHSFM.jhsfm.hsfm import step
 from JHSFM.jhsfm.utils import get_standard_humans_parameters
 from grid_decomp.labeled_grid import GridCell_operations
 from assets.collisondetector import CollisionDetector
 
-# --- HEADLESS-SAFE: nessun import di pynput/glfw, nessun listener tastiera ---
 
-# Per forzare JAX su CPU (opzionale e già presente)
-os.environ['JAX_PLATFORMS'] = 'cpu'
+
 
 # =========================
 # Costanti di ambiente
 # =========================
-ROBOT_RADIUS = 0.2
+from env_config import NUM_RAYS, N_STACKING, MAX_LIN_VEL_ROBOT, DISTANCE_SUCCESS_THRESHOLD, MAX_EPISODE_TIME, ROBOT_RADIUS, LIDAR_THRESHOLD, ROBOT_DT, HUMANS_DT, N_HUMANS, PROGRESS_REWARD_SCALE
+
+
 COLLISION_THRESHOLD = 0.4
-DISTANCE_SUCCESS_THRESHOLD = 0.7
-MAX_EPISODE_TIME = 100.0
-HUMANS_DT = 0.01
-N_STACKING = 10
-ROBOT_DT = 0.25
-MAX_LIN_VEL_ROBOT = 1.0
-PROGRESS_REWARD_SCALE = 0.03
 REPELLENT_FORCE = 0.35
 REPELLENT_WALL_FORCE = 1.0
-NUM_RAYS = 108
 
 # Rendering disabilitato di default in training
 rendering_disable = True
@@ -119,8 +116,11 @@ class il_hamrrln(mobilerobotRL):
             scenario11.scenario11: 11,
             scenario12.scenario12: 12,
             scenario1_easy.scenario1_easy: 13,
-            scenario1_nohumans.scenario1_nohumans: 14,
+            scenarioTEST1.scenarioTEST1: 14,               # NEW
+            scenarioTEST2.scenarioTEST2: 15,               # NEW
+            scenarioTEST3.scenarioTEST3: 16,               # NEW
         }
+
 
         # Pre-carica ostacoli
         self._initialize_obstacles()
@@ -139,11 +139,22 @@ class il_hamrrln(mobilerobotRL):
 
         # Sottoinsieme scenari per IL
         self.scenarios = [
-            scenario1_easy.scenario1_easy,
-            scenario4.scenario4,
-            scenario9.scenario9,
-            scenario12.scenario12,
-            scenario1_nohumans.scenario1_nohumans,
+            ##########scenario1.scenario1, # Incrocio caos
+            ###############scenario4.scenario4, # Corridoio - PARALLEL TRAFFIC
+            
+            scenario5.scenario5, # Scenario con robot che si muove tra 3 tavoli con umani
+            scenario6.scenario6, # Scenario con robot attravers DUE PORTE
+            scenario7.scenario7, # Scenario con robot che gira tra le colonne
+            scenario8.scenario8, # Scenario in fondo, con robot che attraversa la porta con 3 umani nel mezzo
+
+            scenario9.scenario9, # PERPEDICULAR TRAFFIC
+
+            scenario12.scenario12, # Scenario EASY, stanza all'inizio a destra
+            scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFIC
+            scenarioTEST2.scenarioTEST2, # TEST - Incrocio caos
+            #scenarioTEST3.scenarioTEST3, # TEST - PERPEDICULAR TRAFFIC
+
+            # scenario 5 può essere usato come test
         ]
 
         # MuJoCo
@@ -256,22 +267,17 @@ class il_hamrrln(mobilerobotRL):
         stacked_polar_size = 2 * self.n_stacking
 
         obs_low = np.concatenate([
-            np.zeros(stacked_lidar_size, dtype=np.float32),
-            np.concatenate([
-                np.zeros(self.n_stacking, dtype=np.float32),
-                np.full(self.n_stacking, -np.pi, dtype=np.float32)
-            ])
+            np.zeros(stacked_lidar_size, dtype=np.float32),        # lidar
+            np.zeros(self.n_stacking, dtype=np.float32),           # distances
+            np.full(self.n_stacking, -np.pi, dtype=np.float32),    # angles
         ])
-
         obs_high = np.concatenate([
-            np.full(stacked_lidar_size, 200.0, dtype=np.float32),
-            np.concatenate([
-                np.full(self.n_stacking, 200.0, dtype=np.float32),
-                np.full(self.n_stacking, np.pi, dtype=np.float32)
-            ])
+            np.full(stacked_lidar_size, 200.0, dtype=np.float32),  # lidar
+            np.full(self.n_stacking, 200.0, dtype=np.float32),     # distances
+            np.full(self.n_stacking,  np.pi, dtype=np.float32),    # angles
         ])
+        total_obs_size = stacked_polar_size + stacked_lidar_size
 
-        total_obs_size = stacked_lidar_size + stacked_polar_size
         self.observation_space = gym.spaces.Box(
             low=obs_low,
             high=obs_high,
@@ -513,9 +519,9 @@ class il_hamrrln(mobilerobotRL):
         lidar_stack = self._get_stacked_lidar_obs()
 
         observation = np.concatenate([
+            lidar_stack,
             stacked_distances,
             stacked_angles,
-            lidar_stack,
         ]).astype(np.float32)
         return observation
 
@@ -658,14 +664,15 @@ class il_hamrrln(mobilerobotRL):
 
     def _lasers_reward(self, base_reward: float, current_lidar) -> bool:
         collision_detected = False
-        base_reward = 0
+        lidar_reward = 0.0
         for reading in current_lidar:
             if reading < COLLISION_THRESHOLD and reading > self.robot_radius:
-                base_reward -= 0.1
+                lidar_reward -= 0.1
             elif reading <= self.robot_radius:
                 collision_detected = True
-                return collision_detected, base_reward
-        return collision_detected, base_reward
+                return collision_detected, lidar_reward
+        final_reward = base_reward + lidar_reward
+        return collision_detected, final_reward
 
     @lru_cache(maxsize=128)
     def _get_obstacles_from_human_positions(self, humans_state_tuple: Tuple) -> List[List[str]]:

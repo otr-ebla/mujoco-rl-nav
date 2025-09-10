@@ -1,4 +1,6 @@
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+import time, subprocess, shutil
+
 
 class RewardCallback(BaseCallback):
     def __init__(self, verbose=0):
@@ -87,4 +89,222 @@ class RewardCallback(BaseCallback):
             self.episode_results = []
             self.episode_time_lengths = []
 
+        return True
+    
+class GPUStatsCallback(BaseCallback):
+    """
+    Stampa e logga (TensorBoard) util% e memoria GPU a intervalli regolari.
+    Funziona con on-policy (PPO) e off-policy (SAC/TD3/TQC).
+    """
+    def __init__(self, gpu_index: int = 0, min_interval_s: float = 10.0, print_to_stdout: bool = True):
+        super().__init__(verbose=0)
+        self.gpu_index = gpu_index
+        self.min_interval_s = float(min_interval_s)
+        self.print_to_stdout = print_to_stdout
+        self._t_last = 0.0
+        self._nvml = None
+
+    def _init_nvml(self):
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(self.gpu_index)
+            self._nvml = (pynvml, handle)
+        except Exception:
+            self._nvml = None
+
+    def _get_stats(self):
+        # Prova NVML
+        if self._nvml is None:
+            self._init_nvml()
+        if self._nvml is not None:
+            pynvml, handle = self._nvml
+            try:
+                util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # %
+                mem  = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                mem_used, mem_total = int(mem.used // (1024**2)), int(mem.total // (1024**2))  # MiB
+                try:
+                    pwr = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0  # W
+                except Exception:
+                    pwr = None
+                return util, mem_used, mem_total, pwr
+            except Exception:
+                self._nvml = None  # fallback a nvidia-smi
+
+        # Fallback: nvidia-smi
+        if shutil.which("nvidia-smi"):
+            try:
+                out = subprocess.check_output([
+                    "nvidia-smi",
+                    "--query-gpu=utilization.gpu,memory.used,memory.total,power.draw",
+                    "--format=csv,noheader,nounits",
+                    "-i", str(self.gpu_index),
+                ], stderr=subprocess.DEVNULL).decode().strip()
+                util_s, mu_s, mt_s, pwr_s = [x.strip() for x in out.split(",")]
+                util, mem_used, mem_total = int(util_s), int(mu_s), int(mt_s)
+                pwr = float(pwr_s) if pwr_s not in ("", "N/A") else None
+                return util, mem_used, mem_total, pwr
+            except Exception:
+                pass
+        return None, None, None, None
+
+    def _maybe_report(self):
+        now = time.time()
+        if now - self._t_last < self.min_interval_s:
+            return
+        self._t_last = now
+
+        util, mem_used, mem_total, pwr = self._get_stats()
+        # Statistiche PyTorch (se GPU attiva)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                dev = torch.device("cuda")
+                torch_alloc = torch.cuda.memory_allocated(dev) // (1024**2)
+                torch_reserved = torch.cuda.memory_reserved(dev) // (1024**2)
+            else:
+                torch_alloc = torch_reserved = 0
+        except Exception:
+            torch_alloc = torch_reserved = 0
+
+        # Log su TensorBoard
+        if util is not None:
+            self.model.logger.record("gpu/util_percent", float(util))
+        if mem_used is not None and mem_total is not None:
+            self.model.logger.record("gpu/memory_used_mib", float(mem_used))
+            self.model.logger.record("gpu/memory_total_mib", float(mem_total))
+        self.model.logger.record("gpu/torch_mem_alloc_mib", float(torch_alloc))
+        self.model.logger.record("gpu/torch_mem_reserved_mib", float(torch_reserved))
+        if pwr is not None:
+            self.model.logger.record("gpu/power_w", float(pwr))
+
+        # Print opzionale
+        if self.print_to_stdout and util is not None and mem_used is not None:
+            msg = (f"[GPU{self.gpu_index}] util={util:>3}%  mem={mem_used}/{mem_total} MiB  "
+                   f"torch_alloc={torch_alloc} MiB  torch_reserved={torch_reserved} MiB")
+            if pwr is not None:
+                msg += f"  power={pwr:.0f} W"
+            print(msg)
+
+    # On-policy: stampa a fine rollout; Off-policy: throttling su _on_step
+    def _on_rollout_end(self) -> bool:
+        self._maybe_report()
+        return True
+
+    def _on_step(self) -> bool:
+        self._maybe_report()
+        return True
+    
+
+
+
+
+
+
+
+
+
+    
+class GPUStatsCallback(BaseCallback):
+    """
+    Stampa e logga (TensorBoard) util% e memoria GPU a intervalli regolari.
+    Funziona con on-policy (PPO) e off-policy (SAC/TD3/TQC).
+    """
+    def __init__(self, gpu_index: int = 0, min_interval_s: float = 10.0, print_to_stdout: bool = True):
+        super().__init__(verbose=0)
+        self.gpu_index = gpu_index
+        self.min_interval_s = float(min_interval_s)
+        self.print_to_stdout = print_to_stdout
+        self._t_last = 0.0
+        self._nvml = None
+
+    def _init_nvml(self):
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(self.gpu_index)
+            self._nvml = (pynvml, handle)
+        except Exception:
+            self._nvml = None
+
+    def _get_stats(self):
+        # Prova NVML
+        if self._nvml is None:
+            self._init_nvml()
+        if self._nvml is not None:
+            pynvml, handle = self._nvml
+            try:
+                util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # %
+                mem  = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                mem_used, mem_total = int(mem.used // (1024**2)), int(mem.total // (1024**2))  # MiB
+                try:
+                    pwr = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0  # W
+                except Exception:
+                    pwr = None
+                return util, mem_used, mem_total, pwr
+            except Exception:
+                self._nvml = None  # fallback a nvidia-smi
+
+        # Fallback: nvidia-smi
+        if shutil.which("nvidia-smi"):
+            try:
+                out = subprocess.check_output([
+                    "nvidia-smi",
+                    "--query-gpu=utilization.gpu,memory.used,memory.total,power.draw",
+                    "--format=csv,noheader,nounits",
+                    "-i", str(self.gpu_index),
+                ], stderr=subprocess.DEVNULL).decode().strip()
+                util_s, mu_s, mt_s, pwr_s = [x.strip() for x in out.split(",")]
+                util, mem_used, mem_total = int(util_s), int(mu_s), int(mt_s)
+                pwr = float(pwr_s) if pwr_s not in ("", "N/A") else None
+                return util, mem_used, mem_total, pwr
+            except Exception:
+                pass
+        return None, None, None, None
+
+    def _maybe_report(self):
+        now = time.time()
+        if now - self._t_last < self.min_interval_s:
+            return
+        self._t_last = now
+
+        util, mem_used, mem_total, pwr = self._get_stats()
+        # Statistiche PyTorch (se GPU attiva)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                dev = torch.device("cuda")
+                torch_alloc = torch.cuda.memory_allocated(dev) // (1024**2)
+                torch_reserved = torch.cuda.memory_reserved(dev) // (1024**2)
+            else:
+                torch_alloc = torch_reserved = 0
+        except Exception:
+            torch_alloc = torch_reserved = 0
+
+        # Log su TensorBoard
+        if util is not None:
+            self.model.logger.record("gpu/util_percent", float(util))
+        if mem_used is not None and mem_total is not None:
+            self.model.logger.record("gpu/memory_used_mib", float(mem_used))
+            self.model.logger.record("gpu/memory_total_mib", float(mem_total))
+        self.model.logger.record("gpu/torch_mem_alloc_mib", float(torch_alloc))
+        self.model.logger.record("gpu/torch_mem_reserved_mib", float(torch_reserved))
+        if pwr is not None:
+            self.model.logger.record("gpu/power_w", float(pwr))
+
+        # Print opzionale
+        if self.print_to_stdout and util is not None and mem_used is not None:
+            msg = (f"[GPU{self.gpu_index}] util={util:>3}%  mem={mem_used}/{mem_total} MiB  "
+                   f"torch_alloc={torch_alloc} MiB  torch_reserved={torch_reserved} MiB")
+            if pwr is not None:
+                msg += f"  power={pwr:.0f} W"
+            print(msg)
+
+    # On-policy: stampa a fine rollout; Off-policy: throttling su _on_step
+    def _on_rollout_end(self) -> bool:
+        self._maybe_report()
+        return True
+
+    def _on_step(self) -> bool:
+        self._maybe_report()
         return True

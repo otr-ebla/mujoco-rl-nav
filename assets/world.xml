@@ -34,7 +34,7 @@
     <material name="human19_material" rgba="0.6 0.8 0.2 1"/>    <!-- Lime Green -->
     <material name="human20_material" rgba="0.2 0.4 0.8 1"/>    <!-- Sky Blue -->
 
-    <mesh name="room_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/Floor_hospital2.stl"/>
+    <mesh name="room_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/Floor_hospital_new.stl"/>
     <mesh name="robot_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/E30cm.stl"/>
     <mesh name="human_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/ybot.stl"/>
     <mesh name="human_mesh_reversed" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/ybotr.stl"/>
@@ -90,7 +90,26 @@
       <geom name="human5_geom" type="mesh" mesh="human_mesh" material="human5_material"/>
     </body>
     
-    
+    <body name="human6" pos="10 -10 0" euler="0 0 -0">
+      <geom name="human6_geom" type="mesh" mesh="human_mesh_reversed" material="human6_material"/>
+    </body>
+
+    <body name="human7" pos="10 -12 0" euler="0 0 -0">
+      <geom name="human7_geom" type="mesh" mesh="human_mesh" material="human7_material"/>
+    </body>
+
+    <body name="human8" pos="10 -14 0" euler="0 0 -0">
+      <geom name="human8_geom" type="mesh" mesh="human_mesh" material="human8_material"/>
+    </body>
+
+    <body name="human9" pos="10 -16 0" euler="0 0 -0">
+      <geom name="human9_geom" type="mesh" mesh="human_mesh_reversed" material="human9_material"/>
+    </body>
+
+    <body name="human10" pos="10 -18 0" euler="0 0 -0">
+      <geom name="human10_geom" type="mesh" mesh="human_mesh" material="human10_material"/>
+    </body>
+
   </worldbody>
 
   <sensor>

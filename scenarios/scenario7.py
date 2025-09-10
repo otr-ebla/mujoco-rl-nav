@@ -6,9 +6,8 @@ import mujoco.viewer
 # Scenario 7: robot deve girare tra le colonne e raggiungere il target mentre 3 umani sono nel mezzo
 
 
-# NNNNNOOOOOOO
-
 def scenario7():
+    random_x = np.random.uniform(-4.5, 4.5)
     random_y2 = np.random.uniform(-3, 3)
     random_y = np.random.uniform(-4.5, 4.5)
     random_angle = np.random.uniform(-45, 45)
@@ -53,6 +52,37 @@ def scenario7():
 
     
 
+    human6x = -30.38 + random_x
+    human6y = 20.0 
+    start_orientation_human6 = 0.0
+    targethuman6x = -0.0 + random_x
+    targethuman6y = 20.0 
+
+    human7x = -29.26 + random_x
+    human7y = 21.0 
+    start_orientation_human7 = 0.0
+    targethuman7x = -70.0 + random_x
+    targethuman7y = 21.0 
+
+    human8x = -28.56 + random_x
+    human8y = 19.0 
+    start_orientation_human8 = 0.0
+    targethuman8x = -70.0 + random_x
+    targethuman8y = 22.0 
+
+    human9x = -29.0 + random_x
+    human9y = 19.0 
+    start_orientation_human9 = 0.0
+    targethuman9x = -70.0 + random_x
+    targethuman9y = 23.0 
+
+    human10x = -24.6 + random_x
+    human10y = 19.0 
+    start_orientation_human10 = 0.0
+    targethuman10x = -70.0 + random_x
+    targethuman10y = 24.0
+
+
     # return data
     return {
         "mob_robot_startposx": mob_robot_startposx,
@@ -86,7 +116,32 @@ def scenario7():
         "start_orientation_human5": start_orientation_human5,
         "targethuman5x": targethuman5x,
         "targethuman5y": targethuman5y,
-    }           
+        "human6x": human6x,
+        "human6y": human6y,
+        "start_orientation_human6": start_orientation_human6,
+        "targethuman6x": targethuman6x,
+        "targethuman6y": targethuman6y,
+        "human7x": human7x,
+        "human7y": human7y,
+        "start_orientation_human7": start_orientation_human7,
+        "targethuman7x": targethuman7x,
+        "targethuman7y": targethuman7y,
+        "human8x": human8x,
+        "human8y": human8y,
+        "start_orientation_human8": start_orientation_human8,
+        "targethuman8x": targethuman8x,
+        "targethuman8y": targethuman8y,
+        "human9x": human9x,
+        "human9y": human9y,
+        "start_orientation_human9": start_orientation_human9,
+        "targethuman9x": targethuman9x,
+        "targethuman9y": targethuman9y,
+        "human10x": human10x,
+        "human10y": human10y,
+        "start_orientation_human10": start_orientation_human10,
+        "targethuman10x": targethuman10x,
+        "targethuman10y": targethuman10y
+    }
 
 
 

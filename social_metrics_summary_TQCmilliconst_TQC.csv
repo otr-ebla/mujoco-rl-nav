@@ -1,0 +1,2 @@
+episodes,success_rate,collision_rate,timeout_rate,avg_path_len_success,avg_min_dist_human,mean_SPL,mean_space_compliance,mean_avg_angular_jerk
+500,0.956,0.044,0.0,17.237618996217936,2.519525773435831,0.944491257324665,0.9455012270339028,8.20903304469025
