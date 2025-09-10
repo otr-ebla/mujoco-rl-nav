@@ -170,7 +170,7 @@ def load_model(trainer: str, run_id: str, env: VecNormalize, bc_dir: str):
     return model
 
 
-
+# ciciciciicic
 
 def episode_rollout(env: VecNormalize, model, safe_dist: float) -> EpisodeMetrics: 
     # Reset the vectorized env (shape: [n_envs, obs_dim]) with n_envs=1
