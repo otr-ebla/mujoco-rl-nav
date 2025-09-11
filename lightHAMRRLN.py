@@ -16,7 +16,7 @@ from collections import deque
 # Import scenarios efficiently
 from scenarios import scenario1, scenario1_easy, scenario2, scenario3, scenario4, scenario5, scenario6, scenario7, scenario8, scenario9, scenario10, scenario11, scenario12
 from scenarios import scenarioTEST1, scenarioTEST2, scenarioTEST3
-#from no_humans_scenariosS import scenario1_nh, scenario2_nh, scenario3_nh, scenario4_nh, scenario5_nh, scenario6_nh, scenario7_nh, scenario8_nh, scenario9_nh, scenario10_nh, scenario11_nh, scenario12_nh
+from no_humans_scenariosS import scenario1_nh, scenario4_nh, scenario5_nh, scenario6_nh, scenario7_nh, scenario8_nh, scenario9_nh, scenario10_nh, scenario11_nh, scenario12_nh, scenarioTEST1_nh, scenarioTEST2_nh, scenarioTEST3_nh
 
 import jax
 import jax.numpy as jnp
@@ -141,6 +141,19 @@ class light_hamrrln(mobilerobotRL):
             scenarioTEST3.scenarioTEST3: 16
         }
 
+        # self.scenario_mapping = {
+        #     scenario4_nh.scenario4_nh: 1,
+        #     scenario5_nh.scenario5_nh: 2,
+        #     scenario6_nh.scenario6_nh: 3,
+        #     scenario7_nh.scenario7_nh: 4,
+        #     scenario8_nh.scenario8_nh: 5,
+        #     scenario9_nh.scenario9_nh: 6,
+        #     scenario12_nh.scenario12_nh: 7,
+        #     scenarioTEST1_nh.scenarioTEST1_nh: 8,
+        #     scenarioTEST2_nh.scenarioTEST2_nh: 9,
+        #     scenarioTEST3_nh.scenarioTEST3_nh: 10
+        # }
+
         self.scenario_successes = {i: 0 for i in range(1, len(self.scenario_mapping)+2)}
         self.scenario_attempts = {i: 1 for i in range(1, len(self.scenario_mapping)+2)}  # Avoid division by zero
 
@@ -164,23 +177,16 @@ class light_hamrrln(mobilerobotRL):
         
 
         self.scenarios = [
-            ##########scenario1.scenario1, # Incrocio caos
             scenario4.scenario4, # Corridoio - PARALLEL TRAFFIC
-            
             scenario5.scenario5, # Scenario con robot che si muove tra 3 tavoli con umani
             scenario6.scenario6, # Scenario con robot attravers DUE PORTE
             scenario7.scenario7, # Scenario con robot che gira tra le colonne
             scenario8.scenario8, # Scenario in fondo, con robot che attraversa la porta con 3 umani nel mezzo
-
             scenario9.scenario9, # PERPEDICULAR TRAFFIC - GENERALMENTE NON MESSO IN TRAINING
-
             scenario12.scenario12, # Scenario EASY, EASIEST VERY VERY VERY EASY stanza all'inizio a destra
-            
             scenarioTEST2.scenarioTEST2, # TEST - Incrocio caos
             scenarioTEST3.scenarioTEST3, # TEST - PERPEDICULAR TRAFFIC con 7 umani
-            scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFIC
-
-            # scenario 5 (robot tra 3 tavoli con umani che si muove parallelamente a lui )può essere usato ANCHE come test dopo training
+            scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFI
         ]
         
         if len(self.scenarios) < 8:
@@ -970,7 +976,7 @@ class light_hamrrln(mobilerobotRL):
 
 
                 # Apply robot action (NN output)
-                self._apply_robot_action(action, dt = 0.01)
+                self._apply_robot_action(action, dt = self.humans_dt)
                 humans_state_jax = humans_state_with_robot[:-1]  # escludi il robot
                 
             else:
