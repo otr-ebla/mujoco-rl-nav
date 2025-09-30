@@ -25,7 +25,7 @@ from JHSFM.jhsfm.utils import get_standard_humans_parameters
 from grid_decomp.labeled_grid import GridCell_operations
 #from assets.collisondetector import CollisionDetector
 
-from env_config import NUM_RAYS, N_STACKING, MAX_LIN_VEL_ROBOT, MAX_EPISODE_TIME, ROBOT_RADIUS, LIDAR_THRESHOLD, ROBOT_DT, HUMANS_DT, N_HUMANS, PROGRESS_REWARD_SCALE
+from env_config import *
 
 THETA_HIST_LENGTH = 3
 N_STACKING = 2
@@ -177,20 +177,34 @@ class light_hamrrln(mobilerobotRL):
         
 
         self.scenarios = [
-            scenario4.scenario4, # Corridoio - PARALLEL TRAFFIC
+            ################# scenario4.scenario4, # Corridoio - PARALLEL TRAFFIC
+
+
+
             scenario5.scenario5, # Scenario con robot che si muove tra 3 tavoli con umani
             scenario6.scenario6, # Scenario con robot attravers DUE PORTE
             scenario7.scenario7, # Scenario con robot che gira tra le colonne
             scenario8.scenario8, # Scenario in fondo, con robot che attraversa la porta con 3 umani nel mezzo
-            scenario9.scenario9, # PERPEDICULAR TRAFFIC - GENERALMENTE NON MESSO IN TRAINING
-            scenario12.scenario12, # Scenario EASY, EASIEST VERY VERY VERY EASY stanza all'inizio a destra
-            scenarioTEST2.scenarioTEST2, # TEST - Incrocio caos
-            scenarioTEST3.scenarioTEST3, # TEST - PERPEDICULAR TRAFFIC con 7 umani
-            scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFI
+
+            # # # # ################################ scenario9.scenario9, # PERPEDICULAR TRAFFIC - GENERALMENTE NON MESSO IN TRAINING
+
+            scenario12.scenario12, # 12 Scenario EASY, EASIEST VERY VERY VERY EASY stanza all'inizio a destra
+            scenarioTEST1.scenarioTEST1, # 14 TEST - PARALLEL TRAFFI
+            scenarioTEST2.scenarioTEST2, # 15 TEST - Incrocio caos
+            scenarioTEST3.scenarioTEST3, # 16 TEST - PERPEDICULAR TRAFFIC con 7 umani
         ]
         
+        
         if len(self.scenarios) < 8:
-            print("\n\n\n⚠️ STAI ADDESTRANDO CON POCHI SCENARI! ⚠️\n\n\n")
+            if self.training:
+                print("\n\n\n⚠️ STAI ADDESTRANDO CON POCHI SCENARI! ⚠️\n\n\n") 
+            else:
+                print("\n\n\n⚠️ STAI VALUTANDO CON POCHI SCENARI! ⚠️\n\n\n")
+
+        if HUMANS_VELOCITY != 1.0:
+            print(f"\n\n\n⚠️ STAI USANDO HUMANS_VELOCITY = {HUMANS_VELOCITY} ⚠️\n\n\n")
+        else: 
+            print(f"\n\n\n✅ STAI USANDO HUMANS_VELOCITY = {HUMANS_VELOCITY} ✅\n\n\n")
 
 
         self._setup_mujoco()
@@ -424,6 +438,9 @@ class light_hamrrln(mobilerobotRL):
         self.progress_reward_term = 0.0
         self.laser_reward_term = 0.0
         self.progress_orientation_smoothness_term = 0.0
+        self._path_length = 0.0
+        
+        
 
         # Reset previous action for smooth velocity tracking
         #self.previous_action = np.zeros(2, dtype=np.float32)
@@ -463,6 +480,8 @@ class light_hamrrln(mobilerobotRL):
         for _ in range(THETA_HIST_LENGTH):
             self._theta_hist.append(self.robot_theta)
 
+        self._L_star = np.linalg.norm(self.target_pos - self.robot_pos)  # distanza iniziale
+        self._prev_pos = self.robot_pos.copy()
         
         # Initialize humans state tracking
         self._initialize_humans_tracking()
@@ -587,28 +606,41 @@ class light_hamrrln(mobilerobotRL):
 
     
     def _set_humans_initial_state(self, scenario_data: Dict[str, float]):
-        """Set humans initial positions and goals efficiently."""
-        # Extract human data more efficiently
-        human_positions = []
-        human_goals = []
-        
+        """Set humans initial positions and goals robustly (with off-map padding)."""
+        OFF_X = -1e6  # fuori mappa
+        OFF_Y = 0.0
+        OFF_TH = 0.0
+
+        human_goals = []  # list of [[x,y], [gx,gy]]
+
         for i in range(1, self.n_humans + 1):
-            start_pos = [scenario_data[f"human{i}x"], scenario_data[f"human{i}y"]]
-            target_pos = [scenario_data[f"targethuman{i}x"], scenario_data[f"targethuman{i}y"]]
-            orientation = scenario_data[f"start_orientation_human{i}"]
-            
-            human_positions.append(start_pos)
+            # Prendi valori dallo scenario con default off-map se mancano
+            x  = float(scenario_data.get(f"human{i}x", OFF_X))
+            y  = float(scenario_data.get(f"human{i}y", OFF_Y))
+            gx = float(scenario_data.get(f"targethuman{i}x", OFF_X))
+            gy = float(scenario_data.get(f"targethuman{i}y", OFF_Y))
+            ang = float(scenario_data.get(f"start_orientation_human{i}", OFF_TH))
+
+            # Angolo: se sembra in gradi (|ang| > 2π), converti in radianti
+            if abs(ang) > 2 * np.pi:
+                ang = np.deg2rad(ang)
+
+            # Salva goal pair
+            start_pos  = [x, y]
+            target_pos = [gx, gy]
             human_goals.append([start_pos, target_pos])
-            
-            # Set position and orientation in MuJoCo
-            human_id = self.human_body_ids[i-1]
+
+            # Posiziona e orienta il corpo in MuJoCo
+            human_id = self.human_body_ids[i - 1]
             self.model.body_pos[human_id, :2] = start_pos
-            self.model.body_quat[human_id] = [
-                np.cos(orientation/2), 0., 0., np.sin(orientation/2)
-            ]
-        
+            # Yaw -> quat (w, x, y, z) con rotazione attorno a z
+            half = ang * 0.5
+            self.model.body_quat[human_id] = [np.cos(half), 0.0, 0.0, np.sin(half)]
+
+        # Tensor JAX (float32) con shape [n_humans, 2] e [n_humans, 2, 2]
         self.humans_goals = jnp.array(human_goals, dtype=jnp.float32)
-        self.humans_current_goals = jnp.array([pos for pos, _ in human_goals], dtype=jnp.float32)
+        self.humans_current_goals = jnp.array([g[0] for g in human_goals], dtype=jnp.float32)
+
     
     def _set_target_position(self, scenario_data: Dict[str, float]):
         """Set target sphere position."""
@@ -694,6 +726,8 @@ class light_hamrrln(mobilerobotRL):
         """Execute one step in the environment."""
         prev_obs = self._get_obs() 
 
+       
+        
         assert action.shape == (2,), f"Expected action shape (2,), got {action.shape}"
 
         if not self.training: # in testing
@@ -720,7 +754,9 @@ class light_hamrrln(mobilerobotRL):
 
         # Step MuJoCo physics
         mujoco.mj_step(self.model, self.data)
-
+        cur_pos = self.robot_pos.copy()
+        self._path_length += float(np.linalg.norm(cur_pos - self._prev_pos))
+        self._prev_pos = cur_pos
 
 
 
@@ -738,12 +774,21 @@ class light_hamrrln(mobilerobotRL):
         self.episode_return += step_reward
         info["episode_result"] = self.last_episode_result
         if terminated or truncated:
-            
+            info["raw_episode_return"] = float(self.episode_return)
+            info["episode_length"] = int(self.current_step)
+
+
             if DEBUG:
                 print(f"Episode return: {self.episode_return}")
                 print(f"Progress reward term: {progress_reward_term}")
                 print(f"Laser reward term: {laser_reward_term}")
                 print(f"Theta smoothness term: {theta_smoothness_term}")
+
+            if not self.training:
+                print(f"\n\n[DEBUG] Episodio finito ({self.last_episode_result}) - "
+                    f"Path length = {self._path_length:.2f} m, "
+                    f"L* = {self._L_star-0.5:.2f} m",
+                    f"SPL = {(self._L_star-0.5)/self._path_length*100.0:.2f}%\n\n")
 
         return observation, step_reward, terminated, truncated, info
 
@@ -1059,7 +1104,7 @@ class light_hamrrln(mobilerobotRL):
         denom = max(1e-6, (LIDAR_THRESHOLD - float(self.robot_radius)))  # epsilon
         proximity = np.clip((LIDAR_THRESHOLD - min_lidar) / denom, 0.0, 1.0)
         # Peso lidar (tuning): 1.0 dà segnali chiari ma non devastanti
-        w_lidar = 1.0
+        w_lidar = LIDAR_WEIGHT
         return -w_lidar * float(proximity)
 
 
@@ -1154,7 +1199,7 @@ class light_hamrrln(mobilerobotRL):
 
 
         # 6) Success
-        if current_target_distance <= ROBOT_RADIUS:
+        if current_target_distance <= ROBOT_RADIUS+0.3:
             #print(current_target_distance)
             self.last_episode_result = "success"
             terminated = True

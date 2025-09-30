@@ -8,7 +8,7 @@ import mujoco.viewer
 def scenario11():
     random_x = np.random.uniform(-3.5, 3.5)
     random_y = np.random.uniform(-2.5, 2.5)
-    random_angle = np.random.uniform(-35, 35)
+    random_angle = np.random.uniform(-180, 180)
     rad_angle = np.deg2rad(random_angle)    
     mob_robot_startposx = 40.4 + random_x
     mob_robot_startposy = -19

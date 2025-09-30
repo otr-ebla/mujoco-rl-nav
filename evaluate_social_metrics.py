@@ -55,6 +55,7 @@ from typing import List
 import numpy as np
 import pandas as pd
 import torch, pickle
+from math import sqrt
 
 
 from stable_baselines3 import PPO, SAC, TD3, A2C
@@ -62,12 +63,42 @@ from sb3_contrib import TQC
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize, SubprocVecEnv, VecEnv
 from stable_baselines3.common.utils import set_random_seed
 
-from HAMRRLN import hamrrln, N_HUMANS
-from IL_HAMRRLN import NUM_RAYS, N_STACKING
+#from HAMRRLN import hamrrln
+from lightHAMRRLN import light_hamrrln as hamrrln  # versione più leggera senza dipendenze extra
+from env_config import *
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
 import psutil
+import contextlib
+import logging
+
+try:
+    from tqdm.auto import tqdm
+except Exception:
+    class tqdm:  # fallback minimale
+        def __init__(self, total=None, **kwargs): pass
+        def update(self, n=1): pass
+        def close(self): pass
 
 METRICS_DIR = "./EVAL_METRICS"
+
+# Mappa ID -> nome scenario
+SCEN_NAME = {
+    14: "parallel traffic",
+    15: "intersection",
+    16: "perpendicular traffic",
+}
+
+def scen_label(x):
+    """Ritorna il nome se x è 14/15/16, altrimenti l'originale."""
+    try:
+        xi = int(x)
+    except Exception:
+        return str(x)
+    return SCEN_NAME.get(xi, str(x))
+
 
 @dataclass
 class EpisodeMetrics:
@@ -86,10 +117,9 @@ class EpisodeMetrics:
     
 
 
-def load_eval_env(run_id: str, xml: str, stacking: bool, n_stacking: int,
-                  n_envs: int, seed: int) -> VecNormalize: # load evaluation environment
+def load_eval_env(run_id: str, xml: str, stacking: bool, n_stacking: int,                  n_envs: int, seed: int, render: bool) -> VecNormalize:
+    base_vec = build_vec_env(n_envs, xml, stacking, n_stacking, seed, render)
 
-    base_vec = build_vec_env(n_envs, xml, stacking, n_stacking, seed)
     vecnorm_path = os.path.join("./TENSORBOARD", f"{run_id}.pkl")
     if os.path.exists(vecnorm_path):
         env = VecNormalize.load(vecnorm_path, base_vec)
@@ -171,8 +201,21 @@ def load_model(trainer: str, run_id: str, env: VecNormalize, bc_dir: str):
     print("✅ Loaded BC policy into PPO container for evaluation.")
     return model
 
+# --- stats helper for mean ± 95% CI ---
+def _stats_with_ci(series: pd.Series, ci_z: float = 1.96):
+    """Return dict with n, mean, std (ddof=1), se, ci95_low/high for a numeric Series."""
+    x = pd.to_numeric(series, errors="coerce").dropna().values
+    n = int(x.size)
+    if n == 0:
+        return dict(n=0, mean=np.nan, std=np.nan, se=np.nan, ci95_low=np.nan, ci95_high=np.nan)
+    mean = float(np.mean(x))
+    std = float(np.std(x, ddof=1)) if n > 1 else np.nan
+    se  = float(std / np.sqrt(n)) if n > 1 else np.nan
+    ci_low  = float(mean - ci_z * se) if np.isfinite(se) else np.nan
+    ci_high = float(mean + ci_z * se) if np.isfinite(se) else np.nan
+    return dict(n=n, mean=mean, std=std, se=se, ci95_low=ci_low, ci95_high=ci_high)
 
-# ciciciciicic
+
 
 def episode_rollout(env: VecNormalize, model, safe_dist: float) -> EpisodeMetrics: 
     # Reset the vectorized env (shape: [n_envs, obs_dim]) with n_envs=1
@@ -194,6 +237,16 @@ def episode_rollout(env: VecNormalize, model, safe_dist: float) -> EpisodeMetric
     while True:
         action, _ = model.predict(obs, deterministic=True)
         obs, rewards, dones, infos = env.step(action)
+
+        try:
+            if env.num_envs == 1:
+                # VecNormalize → .venv è il VecEnv “sotto”
+                base = env.venv
+                # DummyVecEnv espone la lista envs
+                if hasattr(base, "envs") and len(base.envs) == 1:
+                    base.envs[0].render()
+        except Exception:
+            pass
 
         steps += 1
         cur_pos = np.array(base_env.robot_pos, dtype=np.float32)
@@ -251,46 +304,128 @@ def episode_rollout(env: VecNormalize, model, safe_dist: float) -> EpisodeMetric
 
 
 def summarize_overall(df: pd.DataFrame) -> pd.DataFrame:
-    success_df = df[df["result"] == "success"]
+    succ = df[df["result"] == "success"]
+
+    # stats we need bounds for
+    pl_stats  = _stats_with_ci(succ["path_len"])                 # successes only
+    ttg_stats = _stats_with_ci(succ["time_to_goal"])             # successes only
+    aj_stats  = _stats_with_ci(df["avg_angular_jerk"])           # all episodes (dropna inside)
+    sc_stats = _stats_with_ci(df["space_compliance"])        # all episodes (dropna inside)
+    mhd_stats = _stats_with_ci(df["min_dist_human"])        # all episodes (dropna inside)
+
     s = {
+        # counts / rates
         "episodes": len(df),
         "success_rate": (df["result"] == "success").mean(),
         "collision_rate": (df["result"] == "collision").mean(),
         "timeout_rate": (df["result"] == "timeout").mean(),
-        "avg_path_len_success": df.loc[df["result"] == "success", "path_len"].mean(),
-        "avg_min_dist_human": df["min_dist_human"].mean(),
+
+        # keep your original means for backward-compat
+        "avg_path_len_success": succ["path_len"].mean(),
+        "mean_time_to_goal_success": succ["time_to_goal"].mean(),
+        "mean_avg_angular_jerk": df["avg_angular_jerk"].mean(),
         "mean_SPL": df["spl"].mean(),
         "mean_space_compliance": df["space_compliance"].mean(),
-        "mean_avg_angular_jerk": df["avg_angular_jerk"].mean(),
-        "mean_time_to_goal_success": success_df["time_to_goal"].mean(),
-        "median_time_to_goal_success": success_df["time_to_goal"].median(),
+
+        # NEW: bounded errors (95% CI) + std + n
+        "path_len_success_n": pl_stats["n"],
+        "path_len_success_mean": pl_stats["mean"],
+        "path_len_success_std": pl_stats["std"],
+        "path_len_success_ci95_low": pl_stats["ci95_low"],
+        "path_len_success_ci95_high": pl_stats["ci95_high"],
+
+        "time_to_goal_success_n": ttg_stats["n"],
+        "time_to_goal_success_mean": ttg_stats["mean"],
+        "time_to_goal_success_std": ttg_stats["std"],
+        "time_to_goal_success_ci95_low": ttg_stats["ci95_low"],
+        "time_to_goal_success_ci95_high": ttg_stats["ci95_high"],
+
+        "avg_angular_jerk_n": aj_stats["n"],
+        "avg_angular_jerk_mean": aj_stats["mean"],
+        "avg_angular_jerk_std": aj_stats["std"],
+        "avg_angular_jerk_ci95_low": aj_stats["ci95_low"],
+        "avg_angular_jerk_ci95_high": aj_stats["ci95_high"],
+
+        "space_compliance_n": sc_stats["n"],
+        "space_compliance_mean": sc_stats["mean"],
+        "space_compliance_std": sc_stats["std"],
+        "space_compliance_ci95_low": sc_stats["ci95_low"],
+        "space_compliance_ci95_high": sc_stats["ci95_high"],
+
+        "min_dist_human_n": mhd_stats["n"],
+        "min_dist_human_mean": mhd_stats["mean"],
+        "min_dist_human_std": mhd_stats["std"],
+        "min_dist_human_ci95_low": mhd_stats["ci95_low"],
+        "min_dist_human_ci95_high": mhd_stats["ci95_high"],
     }
     return pd.DataFrame([s])
 
 
 
+
 def summarize_by_scenario(df: pd.DataFrame) -> pd.DataFrame:
     def agg_fun(g: pd.DataFrame) -> pd.Series:
-        gsucc = g[g["result"] == "success"]
+        succ = g[g["result"] == "success"]
+
+        pl_stats  = _stats_with_ci(succ["path_len"])
+        ttg_stats = _stats_with_ci(succ["time_to_goal"])
+        aj_stats  = _stats_with_ci(g["avg_angular_jerk"])
+        sc_stats = _stats_with_ci(g["space_compliance"])
+        mhd_stats = _stats_with_ci(g["min_dist_human"])
+
         return pd.Series({
+            # counts / rates
             "episodes": len(g),
             "success_rate": (g["result"] == "success").mean(),
             "collision_rate": (g["result"] == "collision").mean(),
             "timeout_rate": (g["result"] == "timeout").mean(),
-            "avg_path_len_success": gsucc["path_len"].mean(),
-            "avg_min_dist_human": g["min_dist_human"].mean(),
+
+            # keep existing mean columns
+            "avg_path_len_success": succ["path_len"].mean(),
+            "mean_time_to_goal_success": succ["time_to_goal"].mean(),
+            "mean_avg_angular_jerk": g["avg_angular_jerk"].mean(),
             "mean_SPL": g["spl"].mean(),
             "mean_space_compliance": g["space_compliance"].mean(),
-            "mean_avg_angular_jerk": g["avg_angular_jerk"].mean(),
-            "mean_time_to_goal_success": gsucc["time_to_goal"].mean(),
-            "median_time_to_goal_success": gsucc["time_to_goal"].median(),
+
+            # NEW: bounded errors (95% CI) + std + n
+            "path_len_success_n": pl_stats["n"],
+            "path_len_success_mean": pl_stats["mean"],
+            "path_len_success_std": pl_stats["std"],
+            "path_len_success_ci95_low": pl_stats["ci95_low"],
+            "path_len_success_ci95_high": pl_stats["ci95_high"],
+
+            "time_to_goal_success_n": ttg_stats["n"],
+            "time_to_goal_success_mean": ttg_stats["mean"],
+            "time_to_goal_success_std": ttg_stats["std"],
+            "time_to_goal_success_ci95_low": ttg_stats["ci95_low"],
+            "time_to_goal_success_ci95_high": ttg_stats["ci95_high"],
+
+            "avg_angular_jerk_n": aj_stats["n"],
+            "avg_angular_jerk_mean": aj_stats["mean"],
+            "avg_angular_jerk_std": aj_stats["std"],
+            "avg_angular_jerk_ci95_low": aj_stats["ci95_low"],
+            "avg_angular_jerk_ci95_high": aj_stats["ci95_high"],
+
+            "space_compliance_n": sc_stats["n"],
+            "space_compliance_mean": sc_stats["mean"],
+            "space_compliance_std": sc_stats["std"],
+            "space_compliance_ci95_low": sc_stats["ci95_low"],
+            "space_compliance_ci95_high": sc_stats["ci95_high"],
+
+            "min_dist_human_n": mhd_stats["n"],
+            "min_dist_human_mean": mhd_stats["mean"],
+            "min_dist_human_std": mhd_stats["std"],
+            "min_dist_human_ci95_low": mhd_stats["ci95_low"],
+            "min_dist_human_ci95_high": mhd_stats["ci95_high"],
         })
+
     out = df.groupby("scenario_id", dropna=False).apply(agg_fun).reset_index()
     out = out.sort_values("scenario_id", ascending=True)
     return out
 
 
-def make_env_fn(xml: str, stacking: bool, n_stacking: int, seed: int | None):
+
+def make_env_fn(xml: str, stacking: bool, n_stacking: int, seed: int | None, render_mode: str | None = None):
     def _init():
         env = hamrrln(
             num_rays=NUM_RAYS,
@@ -299,14 +434,14 @@ def make_env_fn(xml: str, stacking: bool, n_stacking: int, seed: int | None):
             n_humans=N_HUMANS,
             n_stacking=n_stacking,
             enable_stacking=stacking,
-            render_mode=None,
+            render_mode=render_mode,
         )
         if seed is not None:
             env.reset(seed=seed)
         return env
     return _init
 
-def make_env_i(i: int, xml: str, stacking: bool, n_stacking: int, seed: int | None):
+def make_env_i(i: int, xml: str, stacking: bool, n_stacking: int, seed: int | None, render_mode: str | None = None):
     """
     Wrapper che imposta l’affinità CPU del worker i
     e poi crea l’ambiente usando la tua make_env_fn.
@@ -318,18 +453,20 @@ def make_env_i(i: int, xml: str, stacking: bool, n_stacking: int, seed: int | No
         except Exception:
             pass
         # Usa la factory esistente, ma con seed differenziato
-        return make_env_fn(xml, stacking, n_stacking, (seed + i) if seed is not None else None)()
+        return make_env_fn(xml, stacking, n_stacking, (seed + i) if seed is not None else None, render_mode)()
     return _init
 
 
-def build_vec_env(n_envs: int, xml: str, stacking: bool, n_stacking: int, seed: int) -> VecEnv:
+def build_vec_env(n_envs: int, xml: str, stacking: bool, n_stacking: int, seed: int,
+                  render: bool) -> VecEnv:
     if n_envs <= 1:
-        return DummyVecEnv([make_env_fn(xml, stacking, n_stacking, seed)])  # ok
+        rm = "human" if render else None
+        return DummyVecEnv([make_env_fn(xml, stacking, n_stacking, seed, rm)])
+    # n_envs > 1 → usa SubprocVecEnv (niente render)
+    env_fns = [make_env_i(i, xml, stacking, n_stacking, seed, None) for i in range(n_envs)]
+    return SubprocVecEnv(env_fns)
 
-    set_random_seed(seed)
-    env_fns = [make_env_i(i, xml, stacking, n_stacking, seed) for i in range(n_envs)]
-    # usa forkserver per evitare eredità di stato CUDA/JAX e freeze
-    return SubprocVecEnv(env_fns, start_method="forkserver")
+
 
 def _extract_omega_from_action(action_vec, info_i, max_ang_vel=None):
     """
@@ -418,6 +555,12 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
     max_ang_vels = np.full(n_envs, np.nan, dtype=np.float64)
 
 
+    # pbar = tqdm(total=episodes_target, desc=f"Evaluating ({n_envs} envs)", unit="ep", leave=False)
+    # prev_disable = logging.root.manager.disable
+    # with contextlib.ExitStack() as stack:
+    #     devnull = stack.enter_context(open(os.devnull, "w"))
+    #     stack.enter_context(contextlib.redirect_stdout(devnull))
+    #     logging.disable(logging.CRITICAL)
 
     while completed < episodes_target:
         actions, _ = model.predict(obs, deterministic=True)
@@ -435,6 +578,13 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
 
         # ora esegui lo step
         obs, rewards, dones, infos = env.step(actions)
+        try:
+            if env.num_envs == 1:
+                base = env.venv  # VecNormalize.venv -> DummyVecEnv
+                if hasattr(base, "envs") and len(base.envs) == 1:
+                    base.envs[0].render()
+        except Exception:
+            pass
 
 
         humans_list  = get_attr("humans_state_numpy")  # può servire come fallback
@@ -489,7 +639,7 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
 
             # Calcolo compliance: se NON ho umani -> metto NaN (non "compliant" di default!)
             if humans_xy is not None and humans_xy.size > 0:
-                step_min = float(np.min(np.linalg.norm(humans_xy - cur_xy[None, :], axis=1)))
+                step_min = float(np.min(np.linalg.norm(humans_xy - (cur_xy[None, :]), axis=1)-HUMANS_RADIUS-ROBOT_RADIUS))
                 min_dist[i] = min(min_dist[i], step_min)
                 if step_min >= safe_dist:
                     space_ok[i] += 1
@@ -510,8 +660,8 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
                 elapsed = time.time() - t0[i]
                 sim_time = steps_total[i] * float(dt_envs[i])  # tempo simulato
                 success_flag = 1.0 if result == "success" else 0.0
-                denom = max(path_len[i], L_star[i], 1e-6)
-                spl = success_flag * (L_star[i] / denom)
+                denom = max(path_len[i], L_star[i]-0.5, 1e-6)
+                spl = success_flag * (L_star[i]-0.5) / denom
 
                 # space_compliance: usa solo i passi valutabili
                 space_comp = (space_ok[i] / steps_eval[i]) if steps_eval[i] > 0 else np.nan
@@ -546,6 +696,7 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
                     "time_to_goal": float(sim_time) if result == "success" else np.nan
                 })
                 completed += 1
+                #pbar.update(1)
                 if completed >= episodes_target:
                     break
 
@@ -567,8 +718,9 @@ def evaluate_parallel(env: VecNormalize, model, episodes_target: int, safe_dist:
                 t0[i]       = time.time()
                 omega_cmd_history[i].clear()
 
-
-    return records
+    # logging.disable(prev_disable)
+    # pbar.close()
+    return records 
 
 
 
@@ -588,6 +740,8 @@ def main():
     parser.add_argument("--n_envs", type=int, default=8, help="Number of parallel envs")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for env.")
     parser.add_argument("--dt", type=float, default=0.25, help="Time step for env.")
+    parser.add_argument("--save_only", action="store_true", help="Salva le figure su disco senza mostrarle a schermo")
+    parser.add_argument("--render", action="store_true", help="Render the environment during evaluation (slows down).")
 
 
     
@@ -604,82 +758,245 @@ def main():
     os.makedirs(METRICS_DIR, exist_ok=True)
 
 
-    env = load_eval_env(args.run_id, args.xml, args.stacking, N_STACKING, args.n_envs, args.seed)
+    env = load_eval_env(args.run_id, args.xml, args.stacking, N_STACKING, args.n_envs, args.seed, args.render)
 
     model = load_model(args.trainer, args.run_id, env, args.bc_dir)
 
     # Evaluate in parallel
     records = evaluate_parallel(env, model, args.episodes, args.safe_dist, args.dt)
     df = pd.DataFrame(records)
-    
-    per_episode_csv = os.path.join(METRICS_DIR, f"social_metrics_{args.run_id}_{args.trainer.upper()}.csv")
-
-    df.to_csv(per_episode_csv, index=False)
 
     # Reuse your existing summary utilities (unchanged)
     overall_df = summarize_overall(df)
     per_scen_df = summarize_by_scenario(df)
+    per_scen_spl = (
+        df[["scenario_id", "spl"]]
+        .dropna(subset=["scenario_id", "spl"])
+        .groupby("scenario_id", as_index=False)["spl"]
+        .mean()
+        .sort_values("scenario_id")
+    )
 
     overall_csv = os.path.join(METRICS_DIR, f"social_metrics_summary_{args.run_id}_{args.trainer.upper()}.csv")
     per_scen_csv = os.path.join(METRICS_DIR, f"social_metrics_by_scenario_{args.run_id}_{args.trainer.upper()}.csv")
+    # Per-episode CSV named to match the comparison script's expectations:
+    per_episode_csv = os.path.join(METRICS_DIR, f"social_metrics_{args.run_id}_{args.trainer.upper()}.csv")
+
     overall_df.to_csv(overall_csv, index=False)
+    print(f"✅ Overall summary saved to {overall_csv}")
+
     per_scen_df.to_csv(per_scen_csv, index=False)
+    print(f"✅ Per-scenario summary saved to {per_scen_csv}")
 
-    print("\n=== Overall Social Performance Summary ===")
-    for k, v in overall_df.iloc[0].items():
-        print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")
+    df.to_csv(per_episode_csv, index=False)
+    print(f"✅ Per-episode metrics saved to {per_episode_csv}")
 
-    print("\n=== Per-Scenario Summary (scenario_id) ===")
-    print(per_scen_df.to_string(index=False))
 
-        # ---- Histogram of success rates by scenario ----
-    plt.figure(figsize=(10, 6))
-    plt.bar(per_scen_df["scenario_id"].astype(str), per_scen_df["success_rate"], color="skyblue", edgecolor="black")
-    plt.xlabel("Scenario ID")
-    plt.ylabel("Success Rate")
-    plt.title(f"Success Rates by Scenario - {args.run_id} ({args.trainer.upper()})")
-    plt.xticks(rotation=45)
-    plt.ylim(0, 1)
-    plt.grid(axis="y", linestyle="--", alpha=0.7)
-    plt.tight_layout()
-    plt.show()
+
+
+
+
+
+
+    # print("\n=== Overall Social Performance Summary ===")
+    # for k, v in overall_df.iloc[0].items():
+    #     print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")
+
+    # print("\n=== Per-Scenario Summary (scenario_id) ===")
+    # print(per_scen_df.to_string(index=False))
+
+    #     # ---- Histogram of success rates by scenario ----
+    # plt.figure(figsize=(10, 6))
+    # ids = per_scen_df["scenario_id"].tolist()
+    # vals = per_scen_df["success_rate"].tolist()
+    # x = np.arange(len(ids))
+    # plt.bar(x, vals, edgecolor="black")
+    # plt.xlabel("Scenario")
+    # plt.ylabel("Success Rate")
+    # plt.title(f"Success Rates by Scenario - {args.run_id} ({args.trainer.upper()})")
+    # plt.xticks(x, [scen_label(s) for s in ids], rotation=45, ha="right")
+    # plt.ylim(0, 1)
+    # plt.grid(axis="y", linestyle="--", alpha=0.7)
+    # plt.tight_layout()
+    # fig_path = os.path.join(METRICS_DIR, f"success_rates_by_scenario_{args.run_id}_{args.trainer.upper()}.png")
+    # plt.savefig(fig_path, dpi=150)
+    # if not args.save_only:
+    #     plt.show()
+    # plt.close()
 
         # --- BOX PLOT: Time-to-Goal per scenario (solo successi) ---
-    df_success = df[df["result"] == "success"].copy()
-    scen_order = sorted(df_success["scenario_id"].dropna().unique().tolist())
+    # df_success = df[df["result"] == "success"].copy()
+    # scen_order = sorted(df_success["scenario_id"].dropna().unique().tolist())
 
-    if len(scen_order) > 0 and df_success["time_to_goal"].notna().any():
-        data_by_scen = [df_success.loc[df_success["scenario_id"] == sid, "time_to_goal"].dropna().values
-                        for sid in scen_order]
+    # if len(scen_order) > 0 and df_success["time_to_goal"].notna().any():
+    #     data_by_scen = [df_success.loc[df_success["scenario_id"] == sid, "time_to_goal"].dropna().values
+    #                     for sid in scen_order]
 
-        plt.figure(figsize=(12, 6))
-        plt.boxplot(data_by_scen, labels=[str(s) for s in scen_order], showfliers=False)
-        plt.xlabel("Scenario ID")
-        plt.ylabel("Time to Goal (s)")
-        plt.title(f"Time-to-Goal by Scenario (Success only) - {args.run_id} ({args.trainer.upper()})")
-        plt.grid(axis="y", linestyle="--", alpha=0.7)
-        plt.tight_layout()
-        plt.show()
+    #     plt.figure(figsize=(12, 6))
+    #     plt.boxplot(data_by_scen, tick_labels=[scen_label(s) for s in scen_order], showfliers=False)
+        
 
-    # --- ISTOGRAMMI: SPL per scenario (uno per scenario) ---
-    for sid in sorted(df["scenario_id"].dropna().unique().tolist()):
-        spl_vals = df.loc[df["scenario_id"] == sid, "spl"].dropna().values
-        if spl_vals.size == 0:
-            continue
-        plt.figure(figsize=(8, 5))
-        plt.hist(spl_vals, bins=20, range=(0.0, 1.0), edgecolor="black")
-        plt.xlabel("SPL")
-        plt.ylabel("Count")
-        plt.title(f"SPL Distribution - Scenario {sid} - {args.run_id} ({args.trainer.upper()})")
-        plt.grid(axis="y", linestyle="--", alpha=0.7)
-        plt.tight_layout()
-        plt.show()
+    #     plt.xlabel("Scenario ID")
+    #     plt.ylabel("Time to Goal (s)")
+    #     plt.title(f"Time-to-Goal by Scenario (Success only) - {args.run_id} ({args.trainer.upper()})")
+    #     plt.grid(axis="y", linestyle="--", alpha=0.7)
+    #     plt.tight_layout()
+    #     fig_path = os.path.join(METRICS_DIR, f"time_to_goal_box_by_scenario_{args.run_id}_{args.trainer.upper()}.png")
+    #     plt.savefig(fig_path, dpi=150)
+    #     if not args.save_only:
+    #         plt.show()
+    #     plt.close()
 
 
 
-    print(f"\nSaved per-episode CSV to {per_episode_csv}")
-    print(f"Saved overall summary CSV to {overall_csv}")
-    print(f"Saved per-scenario summary CSV to {per_scen_csv}")
+
+    # # =============== FIGURA COMBINATA 2×3 ===============
+    # # Ordine scenari coerente su tutti i pannelli
+    
+    # scen_order = sorted(df["scenario_id"].dropna().unique().tolist())
+    # #x_labels = [str(s) for s in scen_order]
+    # x_labels = [scen_label(s) for s in scen_order]
+
+    # # Valori per i bar plot (success rate, SPL medio)
+    # sr_map = dict(zip(per_scen_df["scenario_id"].tolist(),
+    #                   per_scen_df["success_rate"].tolist()))
+    # sr_vals = [float(sr_map.get(s, 0.0)) for s in scen_order]
+    # spl_map = dict(zip(per_scen_spl["scenario_id"].tolist(),
+    #                    per_scen_spl["spl"].tolist()))
+    # spl_vals = [float(spl_map.get(s, 0.0)) for s in scen_order]
+
+    # # (C) Time-to-Goal per scenario (solo successi) → BOX PLOT
+    # ttg_df = df.loc[
+    #      (df["result"] == "success") & df["time_to_goal"].notna(),
+    #      ["scenario_id", "time_to_goal"]
+    #  ]
+    # ttg_box = [
+    #      ttg_df.loc[ttg_df["scenario_id"] == sid, "time_to_goal"].values
+    #      for sid in scen_order
+    #  ]
+
+    # # (D) Path length (solo successi) → BOX PLOT
+    # pl_df = df.loc[
+    #     (df["result"] == "success") & df["path_len"].notna(),
+    #     ["scenario_id", "path_len"]
+    # ]
+    # pl_box = [
+    #     pl_df.loc[pl_df["scenario_id"] == sid, "path_len"].values
+    #     for sid in scen_order
+    # ]
+
+    #  # (C) Space compliance medio per scenario (tutti gli episodi) → BAR per scenario
+    # sc_df = df.loc[df["space_compliance"].notna(), ["scenario_id", "space_compliance"]]
+    # sc_per_scen = (sc_df.groupby("scenario_id")["space_compliance"].mean()
+    #                       .reindex(scen_order))
+    # sc_vals_by_scen = [float(0.0 if np.isnan(v) else v) for v in sc_per_scen.values]
+
+    # # (F) Jerk angolare medio (tutti gli episodi) → BOX PLOT
+    # aj_df = df.loc[df["avg_angular_jerk"].notna(), ["scenario_id", "avg_angular_jerk"]]
+    # aj_box = [
+    #     aj_df.loc[aj_df["scenario_id"] == sid, "avg_angular_jerk"].values
+    #     for sid in scen_order
+    # ]
+ 
+
+    # # Costruisci la figura combinata 2×3
+    #         # Costruisci la figura combinata 2×3
+    # if len(scen_order) > 0:
+    #     fig, axes = plt.subplots(2, 3, figsize=(21, 10), constrained_layout=True)
+        
+
+    #     #axes[0,0].bar(x_labels, sr_vals, edgecolor="black")
+    #     axes[0,0].bar(x_labels, [v*100.0 for v in sr_vals], edgecolor="black")
+    #     axes[0,0].set_title(f"Success Rate per Scenario\n{args.run_id} ({args.trainer.upper()})")
+    #     # axes[0,0].set_xlabel("Scenario ID"); axes[0,0].set_ylabel("Success Rate")
+    #     # axes[0,0].set_ylim(0.0, 1.0)
+    #     axes[0,0].set_xlabel("Scenario ID"); axes[0,0].set_ylabel("Success Rate (%)")
+    #     axes[0,0].set_ylim(0.0, 100.0)
+    #     axes[0,0].yaxis.set_major_formatter(PercentFormatter(xmax=100))
+    #     axes[0,0].grid(axis="y", linestyle="--", alpha=0.7)
+
+    #     #axes[0,1].bar(x_labels, spl_vals, edgecolor="black")
+    #     axes[0,1].bar(x_labels, [v*100.0 for v in spl_vals], edgecolor="black")
+    #     axes[0,1].set_title("Average SPL per Scenario")
+    #     axes[0,1].set_xlabel("Scenario ID"); axes[0,1].set_ylabel("Average SPL (%)")
+    #     axes[0,1].set_ylim(0.0, 100.0)
+    #     axes[0,1].yaxis.set_major_formatter(PercentFormatter(xmax=100))
+    #     axes[0,1].grid(axis="y", linestyle="--", alpha=0.7)
+
+    #     # (C) Space compliance
+    #     if len(sc_vals_by_scen) > 0:
+    #         #axes[0,2].bar(x_labels, sc_vals_by_scen, edgecolor="black")
+    #         axes[0,2].bar(x_labels, [v*100.0 for v in sc_vals_by_scen], edgecolor="black")
+    #         axes[0,2].set_title("Average Space compliance per scenario")
+    #         axes[0,2].set_xlabel("Scenario ID"); axes[0,2].set_ylabel("Compliance (%)")
+    #         axes[0,2].set_ylim(0.0, 100.0)
+    #         axes[0,2].yaxis.set_major_formatter(PercentFormatter(xmax=100))
+    #         axes[0,2].grid(axis="y", linestyle="--", alpha=0.7)
+    #     else:
+    #         axes[0,2].set_title("Average Space compliance per scenario")
+    #         axes[0,2].text(0.5, 0.5, "No data", ha="center", va="center")
+    #         axes[0,2].axis("off")
+
+    #     # (D) Path length (successi) — BOX PLOT
+    #     if any(len(a) for a in pl_box):
+    #         axes[1,0].boxplot(pl_box, tick_labels=x_labels, showfliers=False)
+    #         axes[1,0].set_title("Path length (successi) — box plot")
+    #         axes[1,0].set_xlabel("Scenario ID"); axes[1,0].set_ylabel("Length (m)")
+    #         ymax = float(np.nanmax(pl_df["path_len"])) if not pl_df.empty else 1.0
+    #         axes[1,0].set_ylim(0.0, (1.1 * ymax) if ymax > 0 else 1.0)
+    #         axes[1,0].grid(axis="y", linestyle="--", alpha=0.7)
+    #     else:
+    #         axes[1,0].set_title("Path length (successes) — box plot")
+    #         axes[1,0].text(0.5, 0.5, "No data", ha="center", va="center")
+    #         axes[1,0].axis("off")
+
+    #     # (E) Time-to-Goal (successi) — BOX PLOT
+    #     if any(len(a) for a in ttg_box):
+    #         axes[1,1].boxplot(ttg_box, tick_labels=x_labels, showfliers=False)
+    #         axes[1,1].set_title("Time-to-Goal (successes) — box plot")
+    #         axes[1,1].set_xlabel("Scenario ID"); axes[1,1].set_ylabel("Tempo (s)")
+    #         ymax = float(np.nanmax(ttg_df["time_to_goal"])) if not ttg_df.empty else 1.0
+    #         axes[1,1].set_ylim(0.0, (1.1 * ymax) if ymax > 0 else 1.0)
+    #         axes[1,1].grid(axis="y", linestyle="--", alpha=0.7)
+    #     else:
+    #         axes[1,1].set_title("Time-to-Goal (successes) — box plot")
+    #         axes[1,1].text(0.5, 0.5, "No data", ha="center", va="center")
+    #         axes[1,1].axis("off")
+
+    #     # (F) Jerk angolare medio — BOX PLOT
+    #     if any(len(a) for a in aj_box):
+    #         axes[1,2].boxplot(aj_box, tick_labels=x_labels, showfliers=False)
+    #         axes[1,2].set_title("Average Angular Jerk — box plot")
+    #         axes[1,2].set_xlabel("Scenario ID"); axes[1,2].set_ylabel("rad/s³")
+    #         axes[1,2].grid(axis="y", linestyle="--", alpha=0.7)
+    #     else:
+    #         axes[1,2].set_title("Average Angular Jerk — box plot")
+    #         axes[1,2].text(0.5, 0.5, "No data", ha="center", va="center")
+    #         axes[1,2].axis("off")
+
+    #     # tilt all x-axis labels
+    #     for ax in axes.flatten():
+    #         for tick in ax.get_xticklabels():
+    #             tick.set_rotation(45)
+    #             tick.set_ha("right")
+
+    #     combo_path = os.path.join(METRICS_DIR, f"combined_6panels_{args.run_id}_{args.trainer.upper()}.png")
+    #     plt.savefig(combo_path, dpi=150)
+    #     print(f"\n\n✅ Saved combined figure to {combo_path} ✅\n\n")
+    #     # if not args.save_only:
+    #     #     plt.show()
+    #     plt.close(fig)
+
+
+    # # for ax in axes.flatten():
+    # #     plt.sca(ax)
+    # #     plt.xticks(rotation=45, ha="right")
+
+
+
+    # # print(f"\nSaved per-episode CSV to {per_episode_csv}")
+    # # print(f"Saved overall summary CSV to {overall_csv}")
+    # # print(f"Saved per-scenario summary CSV to {per_scen_csv}")
 
 
 

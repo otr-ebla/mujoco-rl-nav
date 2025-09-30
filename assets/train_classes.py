@@ -1,6 +1,8 @@
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 import os
-
+from collections import deque
+# uses TensorBoard directly so we control the global_step
+from torch.utils.tensorboard import SummaryWriter
 
 
 
@@ -123,6 +125,7 @@ class PolicySaveCallback(BaseCallback):
                 print(f"✅ Saved model at step {self.num_timesteps} to {save_file}")
         return True
     
+
 class RenderCallback(BaseCallback):
     def _on_step(self):
         try:
@@ -136,3 +139,82 @@ class RenderCallback(BaseCallback):
         except Exception as e:
             print("Render error:", e)
         return True
+    
+
+
+
+
+class AveragedRawReturnByStep(BaseCallback):
+    """
+    Collects raw episode returns from env infos and logs:
+      - Moving average over a fixed window
+      - Lifetime average
+      - Exponential moving average (EMA)
+    All scalars are written with global_step = self.num_timesteps,
+    so TensorBoard's x-axis is the training step.
+    """
+    def __init__(
+        self,
+        key_return: str = "raw_episode_return",
+        window: int = 100,
+        ema_alpha: float = 0.1,
+        log_prefix: str = "rollout",
+        verbose: int = 0,
+    ):
+        super().__init__(verbose)
+        self.key_return = key_return
+        self.window = int(window)
+        self.ema_alpha = float(ema_alpha)
+        self.log_prefix = log_prefix
+
+        self._buf = deque(maxlen=self.window)
+        self._sum = 0.0
+        self._count = 0
+        self._ema = None
+        self._writer = None
+
+    def _on_training_start(self) -> None:
+        # Use the same run directory as SB3
+        log_dir = self.logger.get_dir() or (self.model.logger.get_dir() if hasattr(self.model, "logger") else None)
+        # Fallback to a subdir if SB3 logger dir is None (rare)
+        if log_dir is None:
+            log_dir = "./tensorboard"
+        # Optional: separate subfolder to keep things tidy
+        self._writer = SummaryWriter(log_dir=f"{log_dir}/raw_returns")
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", None)
+        if not isinstance(infos, (list, tuple)):
+            return True
+
+        new_vals = []
+        for info in infos:
+            if info and (self.key_return in info):
+                v = float(info[self.key_return])
+                self._buf.append(v)
+                self._sum += v
+                self._count += 1
+                self._ema = v if self._ema is None else (self.ema_alpha * v + (1 - self.ema_alpha) * self._ema)
+                new_vals.append(v)
+
+        # If any episode(s) ended at this training step, emit one log point at the *current step*
+        if new_vals and self._count > 0 and self._writer is not None:
+            step = int(self.num_timesteps)  # <- ensures x-axis = training steps
+            win_mean = sum(self._buf) / len(self._buf)
+            life_mean = self._sum / self._count
+
+            self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_ma_{self.window}", win_mean, global_step=step)
+            self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_avg", life_mean, global_step=step)
+            if self._ema is not None:
+                self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_ema", float(self._ema), global_step=step)
+
+            # (Optional) also plot the most recent raw return
+            # self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_last", new_vals[-1], global_step=step)
+
+            self._writer.flush()
+        return True
+
+    def _on_training_end(self) -> None:
+        if self._writer is not None:
+            self._writer.flush()
+            self._writer.close()

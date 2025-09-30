@@ -308,3 +308,4 @@ class GPUStatsCallback(BaseCallback):
     def _on_step(self) -> bool:
         self._maybe_report()
         return True
+    

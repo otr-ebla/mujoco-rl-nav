@@ -1,156 +1,126 @@
 import numpy as np
-import xml.etree.ElementTree as ET
-import gymnasium as gym 
-import mujoco
-import mujoco.viewer
-# Scenario5: straight corridor wuth tables
 
-# iIMPOSSIBILE!
-
-
+# Scenario5: 5 verticali con tratto minimo 8 m + padding a 20
 def scenario5():
+    # --- Random base ---
     random_x = np.random.uniform(-4.5, 4.5)
-    random_y = np.random.uniform(-2, 2)
+    random_y  = np.random.uniform(-2, 2)
     random_y2 = np.random.uniform(-2, 2)
-    random_angle = np.random.uniform(-60, 60)
+    random_angle = np.random.uniform(-179, 179)
     rad_angle = np.deg2rad(random_angle)
+
+    # --- Robot ---
     mob_robot_startposx = 40.2
-    mob_robot_startposy = -13.46 
+    mob_robot_startposy = -13.46
+    mob_robot_start_orientation = np.deg2rad(90) + rad_angle
+    target_robot_x = 40.5
+    target_robot_y = 10 + random_y
 
-    in_rad_90 = np.deg2rad(90)
-    mob_robot_start_orientation = in_rad_90 + rad_angle
-    
-    target_robot_x = 40.5 
-    target_robot_y = 10  + random_y
+    # ========= Corridoio e tavoli =========
+    # Intervalli liberi lungo Y (adatta se cambi mappa):
+    FREE_SPANS_Y = [
+        (-10.8, -3.6),
+        (-5.0,   4.4),
+        ( 2.8,   7.9),
+        ( 3.2,  12.3),
+    ]
+    BASE_LANES_X = [39.1, 39.5, 40.43, 40.5]
+    LANE_X_JITTER = 0.12
 
-    human1x = 40.5
-    human1y = -3.8
-    start_orientation_human1 = -90
-    targethuman1x = 40.5
-    targethuman1y = -10.6
+    N_ACTIVE = 5
+    N_HUMANS = 20
+    MIN_SEP_Y   = 2   # separazione minima tra pedoni nello stesso span
+    MIN_TRAVEL  = 4    # *** nuovo: tragitto minimo 8 m ***
+    EDGE_MARGIN = 0.10    # margine di sicurezza dagli estremi dello span
+    GOAL_JITTER = 0.25    # jitter sul goal
 
-    human2x = 40.43
-    human2y = -4
-    start_orientation_human2 = 90.0
-    targethuman2x = 40.43
-    targethuman2y = 2.85
+    def pick_lane_x():
+        x = np.random.choice(BASE_LANES_X)
+        return float(x + np.random.uniform(-LANE_X_JITTER, LANE_X_JITTER))
 
-    human3x = 39.5
-    human3y = 11.8 + random_y2
-    start_orientation_human3 = -90.0
-    targethuman3x = 39.5
-    targethuman3y = 5.73 + random_y
+    def sample_y_in_span(span, used, min_sep):
+        y0, y1 = span
+        for _ in range(2000):
+            y = np.random.uniform(y0 + EDGE_MARGIN, y1 - EDGE_MARGIN)
+            if all(abs(y - uy) >= min_sep for uy in used):
+                return float(y)
+        # fallback: griglia
+        grid = np.linspace(y0 + 0.2, y1 - 0.2, max(2, int((y1 - y0) / max(0.4, min_sep))))
+        np.random.shuffle(grid)
+        for y in grid:
+            if all(abs(y - uy) >= min_sep for uy in used):
+                return float(y)
+        return float((y0 + y1) / 2.0)
 
-    human4x = 40.5
-    human4y = 5.1 + random_y
-    start_orientation_human4 = 90
-    targethuman4x = 40.5
-    targethuman4y = 12.1 + random_y2
+    # Filtra gli span che permettono almeno 8 m in totale
+    eligible_spans = [(i, s) for i, s in enumerate(FREE_SPANS_Y) if (s[1] - s[0]) >= (MIN_TRAVEL + 2*EDGE_MARGIN)]
+    if not eligible_spans:
+        # se nessuno span è sufficiente, usa i più lunghi e porteremo il goal al max disponibile
+        eligible_spans = list(enumerate(FREE_SPANS_Y))
 
-    human5x = 39.1
-    human5y = 3.4 + random_y
-    start_orientation_human5 = -90.0
-    targethuman5x = 39.1
-    targethuman5y = -3.4 + random_y2
+    humans = []
+    span_used_y = {idx: [] for idx, _ in eligible_spans}
 
-    
+    for _ in range(N_ACTIVE):
+        # ricampiona finché troviamo start+direzione che garantiscano >= 8 m
+        for _try in range(3000):
+            span_idx, span = eligible_spans[np.random.randint(0, len(eligible_spans))]
+            y0, y1 = span
+            # scegli x-corsia
+            lane_x = pick_lane_x()
+            # scegli y_start
+            y_start = sample_y_in_span(span, span_used_y[span_idx], MIN_SEP_Y)
 
+            # spazio disponibile verso l'alto e verso il basso
+            up_room   = (y1 - EDGE_MARGIN) - y_start
+            down_room = y_start - (y0 + EDGE_MARGIN)
 
+            choices = []
+            if up_room >= MIN_TRAVEL:   choices.append("up")
+            if down_room >= MIN_TRAVEL: choices.append("down")
 
-    human6x = -30.38 + random_x
-    human6y = 20.0 
-    start_orientation_human6 = 0.0
-    targethuman6x = -0.0 + random_x
-    targethuman6y = 20.0 
+            if choices:
+                go_dir = np.random.choice(choices)
+                if go_dir == "up":
+                    # target almeno 8 m sopra, ma non oltre il bordo
+                    y_goal = y_start + np.random.uniform(MIN_TRAVEL, min(MIN_TRAVEL + 2.5, up_room))
+                    start_theta = 90.0
+                else:
+                    y_goal = y_start - np.random.uniform(MIN_TRAVEL, min(MIN_TRAVEL + 2.5, down_room))
+                    start_theta = -90.0
 
-    human7x = -29.26 + random_x
-    human7y = 21.0 
-    start_orientation_human7 = 0.0
-    targethuman7x = -70.0 + random_x
-    targethuman7y = 21.0 
+                y_goal = float(np.clip(y_goal + np.random.uniform(-GOAL_JITTER, GOAL_JITTER),
+                                       y0 + EDGE_MARGIN, y1 - EDGE_MARGIN))
+                span_used_y[span_idx].append(y_start)
 
-    human8x = 18.4
-    human8y = -6.7 
-    start_orientation_human8 = 0.0
-    targethuman8x = 18.4
-    targethuman8y = -21.78
+                humans.append((lane_x, float(y_start), start_theta, lane_x, y_goal))
+                break
+        else:
+            # fallback improbabile: se non riusciamo, metti qualcuno off-map
+            humans.append((-1e6, 0.0, 0.0, -1e6, 0.0))
 
-    human9x = -29.0 + random_x
-    human9y = 19.0 
-    start_orientation_human9 = 0.0
-    targethuman9x = -70.0 + random_x
-    targethuman9y = 23.0 
+    # Padding fino a 20
+    OFF_X = -1e6
+    OFF_Y = 0.0
+    OFF_TH = 0.0
+    while len(humans) < N_HUMANS:
+        i = len(humans) + 1
+        dy = (i - 10) * 0.01
+        humans.append((OFF_X, OFF_Y + dy, OFF_TH, OFF_X, OFF_Y + dy))
 
-    human10x = -24.6 + random_x
-    human10y = 19.0 
-    start_orientation_human10 = 0.0
-    targethuman10x = -70.0 + random_x
-    targethuman10y = 24.0
-
-
-    # return data
-    return {
-        "mob_robot_startposx": mob_robot_startposx,
-        "mob_robot_startposy": mob_robot_startposy,
-        "mob_robot_start_orientation": mob_robot_start_orientation,
-        "target_robot_x": target_robot_x,
-        "target_robot_y": target_robot_y,
-        "rad_angle": rad_angle,
-        "human1x": human1x,
-        "human1y": human1y,
-        "start_orientation_human1": start_orientation_human1,
-        "targethuman1x": targethuman1x,
-        "targethuman1y": targethuman1y,
-        "human2x": human2x,
-        "human2y": human2y,
-        "start_orientation_human2": start_orientation_human2,
-        "targethuman2x": targethuman2x,
-        "targethuman2y": targethuman2y,
-        "human3x": human3x,
-        "human3y": human3y,
-        "start_orientation_human3": start_orientation_human3,
-        "targethuman3x": targethuman3x,
-        "targethuman3y": targethuman3y,
-        "human4x": human4x,
-        "human4y": human4y,
-        "start_orientation_human4": start_orientation_human4,
-        "targethuman4x": targethuman4x,
-        "targethuman4y": targethuman4y,
-        "human5x": human5x,
-        "human5y": human5y,
-        "start_orientation_human5": start_orientation_human5,
-        "targethuman5x": targethuman5x,
-        "targethuman5y": targethuman5y,
-        "human6x": human6x,
-        "human6y": human6y,
-        "start_orientation_human6": start_orientation_human6,
-        "targethuman6x": targethuman6x,
-        "targethuman6y": targethuman6y,
-        "human7x": human7x,
-        "human7y": human7y,
-        "start_orientation_human7": start_orientation_human7,
-        "targethuman7x": targethuman7x,
-        "targethuman7y": targethuman7y,
-        "human8x": human8x,
-        "human8y": human8y,
-        "start_orientation_human8": start_orientation_human8,
-        "targethuman8x": targethuman8x,
-        "targethuman8y": targethuman8y,
-        "human9x": human9x,
-        "human9y": human9y,
-        "start_orientation_human9": start_orientation_human9,
-        "targethuman9x": targethuman9x,
-        "targethuman9y": targethuman9y,
-        "human10x": human10x,
-        "human10y": human10y,
-        "start_orientation_human10": start_orientation_human10,
-        "targethuman10x": targethuman10x,
-        "targethuman10y": targethuman10y
+    # Build dict
+    result = {
+        "mob_robot_startposx": float(mob_robot_startposx),
+        "mob_robot_startposy": float(mob_robot_startposy),
+        "mob_robot_start_orientation": float(mob_robot_start_orientation),
+        "target_robot_x": float(target_robot_x),
+        "target_robot_y": float(target_robot_y),
+        "rad_angle": float(rad_angle),
     }
-
-
-
-
-
-
-
+    for i, (hx, hy, htheta, tx, ty) in enumerate(humans, start=1):
+        result[f"human{i}x"] = float(hx)
+        result[f"human{i}y"] = float(hy)
+        result[f"start_orientation_human{i}"] = float(htheta)  # gradi ±90
+        result[f"targethuman{i}x"] = float(tx)
+        result[f"targethuman{i}y"] = float(ty)
+    return result

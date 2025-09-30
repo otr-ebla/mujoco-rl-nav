@@ -18,7 +18,7 @@ def scenario4():
     randomy5 = np.random.uniform(-3.0, 3.0)
 
 
-    random_angle = np.random.uniform(-45, 45)
+    random_angle = np.random.uniform(-180, 180)
     rad_angle = np.deg2rad(random_angle)
     
     mob_robot_startposx = 55.1 + random_xr

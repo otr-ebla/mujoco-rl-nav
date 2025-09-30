@@ -17,9 +17,9 @@ from torch import nn
 from assets.custom_callback import RewardCallback, GPUStatsCallback
 
 #from HAMRRLN import hamrrln
-#from actionHAMRRLN import actionhamrrln as hamrrln
-#from HAMRRLN import hamrrln
 from lightHAMRRLN import light_hamrrln as hamrrln
+
+from CNN_lstmNN import CNNLSTMExtractor
 
 from stable_baselines3.common.callbacks import BaseCallback
 from assets.custompolicy import TanhActorCriticPolicy
@@ -27,7 +27,7 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 
 from env_config import NUM_RAYS, N_STACKING, N_HUMANS
 import logging
-from assets.train_classes import ScenarioSuccessCallback, PolicySaveCallback, RenderCallback
+from assets.train_classes import ScenarioSuccessCallback, PolicySaveCallback, RenderCallback, AveragedRawReturnByStep
 
 import os
 os.environ['JAX_PLATFORMS'] = 'cpu'
@@ -128,6 +128,8 @@ def train_agent(num_rays,
                 stacking=True,
                 n_stacking=10,
                 cl_resume = False,
+                init_from: str | None = None,
+                init_keep_timesteps: bool = False,
                 bc_policy_path="bc_policy/",
                 render_training=False,
                 force=False):
@@ -152,7 +154,7 @@ def train_agent(num_rays,
     else:
         # Create vectorized environment
         if render_training and num_envs == 1:
-            env = DummyVecEnv([ lambda: hamrrln(
+            raw_env = DummyVecEnv([ lambda: hamrrln(
                 num_rays=num_rays,
                 model_path=model_path,
                 training=training,
@@ -165,12 +167,31 @@ def train_agent(num_rays,
 
 
         # STANDARD RL TRAINING ENVS
-        else:        # Create multiple parallel environments
-            env = SubprocVecEnv(
+        else:
+            raw_env = SubprocVecEnv(
                 [make_env(num_rays, model_path, training=training) for _ in range(num_envs)],
                 start_method="forkserver"
             )
-        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+        # VecNormalize: se sto riprendendo, carico le RMS; altrimenti creo nuove RMS
+        if cl_resume:
+            normalize_path = os.path.join(log_dir, f"{run_id}.pkl")
+            if os.path.exists(normalize_path):
+                env = VecNormalize.load(normalize_path, raw_env)
+                print(f"✅ Loaded VecNormalize from {normalize_path}")
+            else:
+                print(f"⚠️ VecNormalize file not found: {normalize_path} → creating fresh stats")
+                env = VecNormalize(raw_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+        elif init_from:
+            src_norm = os.path.join(log_dir, f"{init_from}.pkl")
+            if os.path.exists(src_norm):
+                env = VecNormalize.load(src_norm, raw_env)
+                print(f"✅ INIT-FROM: loaded VecNormalize from {src_norm}")
+            else:
+                print(f"⚠️ INIT-FROM: {src_norm} not found → creating fresh stats")
+
+                env = VecNormalize(raw_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+        else:
+            env = VecNormalize(raw_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
  
         
@@ -185,27 +206,24 @@ def train_agent(num_rays,
     if cl_resume:
         print("Resuming training with Curriculum Learning...")
 
-        pre_trained_path = os.path.join(log_dir, f"{run_id}.zip")
+        pre_trained_path = f"{run_id}.zip"
 
         if os.path.exists(pre_trained_path):
             print(f"✅ Loading pre-trained model from {pre_trained_path}")
             if trainer == "PPO":
-                model = PPO.load(pre_trained_path, env=env)
+                model = PPO.load(pre_trained_path, env=env, device="auto")
             elif trainer == "SAC":
-                model = SAC.load(f"{pre_trained_path}", env=env)
+                model = SAC.load(pre_trained_path, env=env, device="auto")
             elif trainer == "TD3":
-                model = TD3.load(f"{pre_trained_path}", env=env)
+                model = TD3.load(pre_trained_path, env=env, device="auto")
             elif trainer == "TQC":
-                model = TQC.load(f"{pre_trained_path}", env=env)
+                model = TQC.load(pre_trained_path, env=env, device="auto")
             else:   
                 raise ValueError(f"Unsupported trainer: {trainer}. Choose from PPO, SAC, TD3, or TQC.")
             
-            normalize_path = os.path.join(log_dir, f"{pre_trained_path}.pkl")
-            if os.path.exists(normalize_path):
-                env = VecNormalize.load(normalize_path, env)
-                print(f"✅ Loaded normalization parameters from {normalize_path}")
-            else:
-                print(f"⚠️ Normalization file {normalize_path} not found, using default normalization")
+          
+           # --- INIT-FROM (clone weights into a NEW run_id, then continue) ---
+
         else:
             # BC CASE
             print(f"⚠️ No model named {pre_trained_path} found, loading BC policy from {bc_policy_path}/best_policy.pt")
@@ -302,41 +320,61 @@ def train_agent(num_rays,
             if trainer_name is not None:
                 print(f"Training {trainer_name} agent with Curriculum Learning for {num_steps} steps...")
 
-   
+    elif init_from:
+        print(f"INIT-FROM: cloning weights from '{init_from}' into NEW run_id '{run_id}' …")
+        src_model = f"{init_from}.zip"
+        if not os.path.exists(src_model):
+            raise FileNotFoundError(f"INIT-FROM: source model '{src_model}' not found.")
+        # Carica i pesi del modello sorgente sulla nuova env normalizzata
+        if trainer.upper() == "PPO":
+            model = PPO.load(src_model, env=env, device="auto")
+        elif trainer.upper() == "SAC":
+            model = SAC.load(src_model, env=env, device="auto")
+        elif trainer.upper() == "TD3":
+            model = TD3.load(src_model, env=env, device="auto")
+        elif trainer.upper() == "TQC":
+            model = TQC.load(src_model, env=env, device="auto")
+        else:
+            raise ValueError(f"Unsupported trainer: {trainer}. Choose from PPO, SAC, TD3, or TQC.")
+        trainer_name = trainer.upper()
+
+        print("✅ INIT-FROM: weights loaded. Starting a NEW run; the source files remain untouched.")
 
     # --- Standard RL Training Setup ---
 
     else:
         # --- PPO (tighter, more on-policy) ---
         if trainer == "PPO" or trainer == "ppo":
+            def linear_schedule(initial_value: float):
+        # SB3 passa progress_remaining ∈ [1,0]
+                return lambda progress_remaining: progress_remaining * initial_value
+
             policy_kwargs = dict(
-                net_arch=[256, 256, 128],
-                activation_fn=nn.Tanh,
+                activation_fn=torch.nn.Tanh,
+                net_arch=dict(pi=[256, 256, 128], vf=[256, 256, 128]),
                 ortho_init=True,
                 log_std_init=-1.0,
             )
 
-            # With many envs, prefer shorter rollouts & more epochs
             model = PPO(
-                policy="MlpPolicy",
-                env=env,
-                tensorboard_log=log_dir,
-                device="cpu",
-                learning_rate=3e-4,          # a hair higher speeds converge
-                n_steps=256,                  # ↓ from 512 → fresher data
-                batch_size= min(8192, 36*256),# big but not huge batches
-                n_epochs=10,                  # ↑ from 4 → better fit per batch
-                gamma=0.995,                  # slightly longer credit assignment
+                "MlpPolicy",
+                env,                              # VecNormalize + VecEnv già creato
+                learning_rate=linear_schedule(3e-4),
+                n_steps=640,                     # ↑ rollout per batch più ricco
+                batch_size=1024,                  # grande ⇒ gradienti più stabili
+                n_epochs=10,                      # 10–15 ok; oltre tende ad overfit
+                gamma=0.995,                      # leggermente più “lungo” di 0.99
                 gae_lambda=0.95,
-                use_sde=True,
-                sde_sample_freq=1,            # resample each step for smoother noise
-                clip_range=0.2,
-                clip_range_vf=0.2,
-                ent_coef=0.001,               # a touch of exploration, less than 0.003
+                clip_range=0.10,                  # più conservativo di 0.2
+                ent_coef=1e-3,                    # ↓ esplorazione casuale
                 vf_coef=0.5,
                 max_grad_norm=0.5,
-                target_kl=0.03,               # relax a bit to prevent premature stop
+                target_kl=0.015,                  # ferma update troppo aggressivi
+                use_sde=True,                     # utile nei continui
+                sde_sample_freq=64,
                 policy_kwargs=policy_kwargs,
+                tensorboard_log=log_dir,
+                device="cpu",                # "cuda" se vuoi usare la GPU
                 verbose=1,
             )
             trainer_name = "PPO"
@@ -353,29 +391,51 @@ def train_agent(num_rays,
 
 
         elif trainer.lower() == "sac" or trainer == "SAC":
-            use_cuda = torch.cuda.is_available()
-            policy_kwargs = dict(
-                net_arch=dict(pi=[128, 128], qf=[128, 128]),
-                activation_fn=nn.ReLU,
-            )
             model = SAC(
-                policy="MlpPolicy",
-                env=env,
-                device=("cuda" if use_cuda else "cpu"),
+                "MlpPolicy",
+                env,
                 tensorboard_log=log_dir,
-                learning_rate=3e-4,
-                gamma=0.99,
-                tau=0.02,                 # slightly larger to converge with fewer target updates
-                buffer_size=200_000,      # ↓ RAM
-                batch_size=256,           # ↓ compute per update
-                train_freq=(16, "step"),  # update less often
-                gradient_steps=1,         # 1 gradient step per train call
-                learning_starts=10_000,   # shorter warmup to start learning earlier
-                ent_coef="auto_0.25",     # okay exploration, a bit cheaper to stabilize
-                target_update_interval=1, # fine with tau=0.02
-                policy_kwargs=policy_kwargs,
+                learning_rate=3e-4,           # Learning rate classico per SAC
+                buffer_size=int(1e6),         # Esperienza replay ampia
+                batch_size=256,               # Batch sufficientemente grande per ambienti continui
+                tau=0.005,                    # Target smoothing coefficient
+                gamma=0.99,                   # Discount tipico per robotica
+                train_freq=1,                 # Aggiornamento ogni step
+                gradient_steps=1,             # 1 per step, puoi aumentare
+                ent_coef="auto",              # Automatic entropy tuning
+                target_update_interval=1,     # Aggiorna target ogni step
+                policy_kwargs={
+                    "net_arch": [256, 256],   # Architettura MLP robusta
+                    "log_std_init": -2,       # Inizializzazione della std
+                },
                 verbose=1,
+                device="cuda",                # Metti cuda per GPU, altrimenti "cpu"
             )
+            
+            # model = SAC(
+            #     "MlpPolicy",
+            #     env,
+            #     tensorboard_log=log_dir,
+            #     learning_rate=3e-4,
+            #     buffer_size=1_000_000,
+            #     batch_size=256,
+            #     tau=0.005,
+            #     gamma=0.99,
+            #     train_freq=1,
+            #     gradient_steps=1,
+            #     ent_coef="auto",
+            #     target_update_interval=1,
+            #     policy_kwargs=dict(
+            #         features_extractor_class=CNNLSTMExtractor,
+            #         features_extractor_kwargs=dict(time_steps=n_stacking),  # uses your --n_stacking
+            #         # small MLP heads after the extractor:
+            #         net_arch=dict(pi=[256], qf=[256]),
+            #         activation_fn=nn.ReLU,
+            #         log_std_init=-1.0,
+            #     ),
+            #     verbose=1,
+            #     device="cuda",
+            # )
 
 
 
@@ -515,6 +575,9 @@ def train_agent(num_rays,
         else:
             raise ValueError(f"Unsupported trainer: {trainer}. Choose from PPO, SAC, TD3, TQC, or BC.")
 
+    env.training = True
+    env.norm_reward = True  
+
     print("\n\n\n")
     print("GPU disponibile:", torch.cuda.is_available())
     print("Device policy SB3:", getattr(model.policy, "device", "N/A"))
@@ -532,9 +595,14 @@ def train_agent(num_rays,
     scenario_success_callback = ScenarioSuccessCallback(log_freq=2000, verbose=1)
 
 
+    avg_raw_cb = AveragedRawReturnByStep(
+        key_return="raw_episode_return",  # matches what your env puts in info
+        window=100,                       # change to taste (e.g., 50/200)
+        ema_alpha=0.1,                    # smoother (lower) or more reactive (higher)
+        log_prefix="rollout"
+    )
+    callbacks = [checkpoint_callback, reward_callback, scenario_success_callback, GPUStatsCallback(gpu_index=0, min_interval_s=10), avg_raw_cb]
 
-    callbacks = [checkpoint_callback, reward_callback, scenario_success_callback, GPUStatsCallback(gpu_index=0, min_interval_s=10)]
-    
 
     if render_training and num_envs == 1:
         # Add render callback only if training in a single environment
@@ -547,6 +615,7 @@ def train_agent(num_rays,
     try:
         model.learn(
             total_timesteps=num_steps,
+            reset_num_timesteps=(not cl_resume and not init_keep_timesteps),  # don't reset if resuming CL
             callback=callbacks,
             tb_log_name=run_id  # This ensures logs go to the correct subdirectory
         )
@@ -611,6 +680,10 @@ if __name__ == "__main__":
                         help="Render the training environment (single env only).")
     parser.add_argument("--force", action="store_true",
                         help="Force overwrite if run_id exists.")
+    parser.add_argument("--init_from", type=str, default=None,
+                       help="Clone weights (and VecNormalize if available) from this run_id into a NEW run_id, then continue training.")
+    parser.add_argument("--init_keep_timesteps", action="store_true",
+                       help="When used with --init_from, keep timesteps (do not reset). Default: reset to 0.")
 
     args = parser.parse_args()
     stacking = not args.no_stacking
@@ -756,6 +829,8 @@ if __name__ == "__main__":
             stacking=stacking,
             n_stacking=args.n_stacking,
             cl_resume=args.CL,
+            init_from=args.init_from,
+            init_keep_timesteps=args.init_keep_timesteps,
             bc_policy_path=bc_policy_path,
             render_training=args.render_training,
             force=args.force,

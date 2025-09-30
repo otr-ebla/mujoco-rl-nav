@@ -173,7 +173,7 @@ class hamrrln(mobilerobotRL):
             scenario9.scenario9, # PERPEDICULAR TRAFFIC - GENERALMENTE NON MESSO IN TRAINING
 
             scenario12.scenario12, # Scenario EASY, EASIEST VERY VERY VERY EASY stanza all'inizio a destra
-            #scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFIC
+            scenarioTEST1.scenarioTEST1, # TEST - PARALLEL TRAFFIC
             scenarioTEST2.scenarioTEST2, # TEST - Incrocio caos
             scenarioTEST3.scenarioTEST3, # TEST - PERPEDICULAR TRAFFIC con 7 umani
 
@@ -1294,6 +1294,10 @@ class hamrrln(mobilerobotRL):
 
 
 
+    def _ang_diff(self, a: float, b: float) -> float:
+        return np.arctan2(np.sin(a - b), np.cos(a - b))
+
+    
     # --- utils (metti vicino ad altre util se preferisci) ---
     def _safe_div(self, num: float, den: float, eps: float = 1e-8) -> float:
         return float(num) / float(den + eps)
@@ -1314,7 +1318,7 @@ class hamrrln(mobilerobotRL):
         denom = max(1e-6, (LIDAR_THRESHOLD - float(self.robot_radius)))  # epsilon
         proximity = np.clip((LIDAR_THRESHOLD - min_lidar) / denom, 0.0, 1.0)
         # Peso lidar (tuning): 1.0 dà segnali chiari ma non devastanti
-        w_lidar = 1.0
+        w_lidar = 0.1
         return -w_lidar * float(proximity)
 
 
@@ -1360,6 +1364,7 @@ class hamrrln(mobilerobotRL):
 
         # 1) Collisione immediata
         if self._collision_detection(current_lidar):
+            
             self.last_episode_result = "collision"
             terminated = True
             step_reward += -70.0
@@ -1406,9 +1411,6 @@ class hamrrln(mobilerobotRL):
         theta_smoothness_penalty = float(np.clip(theta_smoothness_penalty, -0.3, 0.0))
         step_reward += theta_smoothness_penalty
 
-        # (Opzionale) Speed regulation: riattivalo solo se usi velocità già scalate in m/s
-        # speed_reward = self._calculate_speed_regulation_reward(current_lidar, current_action=<lin vel in m/s>)
-        # step_reward += np.clip(speed_reward, -0.1, 0.05)
 
         # 6) Success
         if current_target_distance <= ROBOT_RADIUS:

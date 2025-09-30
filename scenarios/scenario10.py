@@ -10,7 +10,7 @@ def scenario10():
     random_n = 1.7
     random_x = np.random.uniform(-random_n, random_n)
     random_y = np.random.uniform(-random_n, random_n)
-    random_angle = np.random.uniform(-40, 40)
+    random_angle = np.random.uniform(-180, 180)
 
     rad_angle = np.deg2rad(random_angle)
 
