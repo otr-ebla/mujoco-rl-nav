@@ -417,9 +417,14 @@ class light_hamrrln(mobilerobotRL):
 
 
 
-    def reset(self, seed: Optional[int] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
+    def reset(self, *, seed: int | None = None, options: dict | None = None):
         """Reset the environment to initial state."""
-        
+        if seed is not None: 
+            try:
+                super().reset(seed=seed)
+            except Exception:
+                np.random.seed(seed)
+                random.seed(seed)
         
         self._update_episode_stats()
 

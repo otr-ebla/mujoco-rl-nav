@@ -187,32 +187,51 @@ class AveragedRawReturnByStep(BaseCallback):
         if not isinstance(infos, (list, tuple)):
             return True
 
-        new_vals = []
+        updated = False
         for info in infos:
-            if info and (self.key_return in info):
-                v = float(info[self.key_return])
-                self._buf.append(v)
-                self._sum += v
-                self._count += 1
-                self._ema = v if self._ema is None else (self.ema_alpha * v + (1 - self.ema_alpha) * self._ema)
-                new_vals.append(v)
+            if not info:
+                continue
 
-        # If any episode(s) ended at this training step, emit one log point at the *current step*
-        if new_vals and self._count > 0 and self._writer is not None:
-            step = int(self.num_timesteps)  # <- ensures x-axis = training steps
+            val = None
+            # 1) preferred: your env’s raw (unnormalized) episodic return
+            if "raw_episode_return" in info:
+                val = float(info["raw_episode_return"])
+            # 2) fallback: Monitor’s summary on terminal transitions
+            elif "episode" in info and isinstance(info["episode"], dict) and "r" in info["episode"]:
+                val = float(info["episode"]["r"])
+
+            if val is None:
+                continue
+
+            # update buffers / EMA exactly as you already do
+            self._buf.append(val)
+            self._sum += val
+            self._count += 1
+            self._ema = val if self._ema is None else (self.ema_alpha * val + (1 - self.ema_alpha) * self._ema)
+            updated = True
+
+        if updated and self._count > 0 and self._writer is not None:
+            step = int(self.num_timesteps)  # keep x-axis = training steps
             win_mean = sum(self._buf) / len(self._buf)
             life_mean = self._sum / self._count
-
-            self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_ma_{self.window}", win_mean, global_step=step)
-            self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_avg", life_mean, global_step=step)
+            self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_ma_{self.window}", win_mean, step)
+            self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_avg", life_mean, step)
             if self._ema is not None:
-                self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_ema", float(self._ema), global_step=step)
-
-            # (Optional) also plot the most recent raw return
-            # self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_last", new_vals[-1], global_step=step)
-
+                self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_ema", float(self._ema), step)
             self._writer.flush()
+
+        # (optional) heartbeat so the curve advances even if no episode ends for a while
+        if self._writer and self._count > 0 and (self.num_timesteps % 10_000 == 0):
+            step = int(self.num_timesteps)
+            win_mean = sum(self._buf) / len(self._buf)
+            life_mean = self._sum / self._count
+            self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_ma_{self.window}", win_mean, step)
+            self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_avg", life_mean, step)
+            if self._ema is not None:
+                self._writer.add_scalar(f"{self.log_prefix}/ep_rew_raw_ema", float(self._ema), step)
+
         return True
+
 
     def _on_training_end(self) -> None:
         if self._writer is not None:

@@ -3,12 +3,14 @@ import math
 import time
 import gymnasium as gym
 from gymnasium import spaces
+from gymnasium.wrappers import TimeLimit
 from stable_baselines3 import PPO, SAC, TD3, A2C
 from sb3_contrib import TQC
 
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv,VecNormalize 
+from stable_baselines3.common.monitor import Monitor
 import argparse
 import xml.etree.ElementTree as ET
 import os
@@ -101,7 +103,7 @@ def _safe_save(model, env, run_id, log_dir, suffix="interrupt"):
 
 
 
-def make_env(num_rays, model_path="assets/world.xml", training = True, n_humans = N_HUMANS, render_mode=None, n_stacking = 10, stacking=True):
+def make_env(num_rays, model_path="assets/world.xml", training = True, n_humans = N_HUMANS, render_mode=None, n_stacking = 10, stacking=True, max_steps = 1000):
     def _init():
         env = hamrrln(
             num_rays=num_rays, 
@@ -111,6 +113,8 @@ def make_env(num_rays, model_path="assets/world.xml", training = True, n_humans 
             n_stacking=n_stacking,
             enable_stacking=stacking,
             )
+        env = TimeLimit(env, max_episode_steps=max_steps)
+        env = Monitor(env, filename=None, allow_early_resets=True)  # Wrap with Monitor to record episode stats
         return env
     return _init
 
@@ -361,7 +365,7 @@ def train_agent(num_rays,
                 env,                              # VecNormalize + VecEnv già creato
                 learning_rate=linear_schedule(3e-4),
                 n_steps=640,                     # ↑ rollout per batch più ricco
-                batch_size=1024,                  # grande ⇒ gradienti più stabili
+                batch_size=512,                  # grande ⇒ gradienti più stabili
                 n_epochs=10,                      # 10–15 ok; oltre tende ad overfit
                 gamma=0.995,                      # leggermente più “lungo” di 0.99
                 gae_lambda=0.95,
