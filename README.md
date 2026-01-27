@@ -197,6 +197,9 @@ If you use this repository for your work, please cite:
   url = {https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation}
 }
 ```
+---
+## Video
+[Video of experiments](https://drive.google.com/file/d/13LlAUHU_UCqAqarpX_SyPjRMMIekPgpI/view?usp=sharing)
 
 ---
 
