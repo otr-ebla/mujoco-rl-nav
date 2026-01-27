@@ -199,7 +199,7 @@ If you use this repository for your work, please cite:
 ```
 ---
 ## Video
-[Video of experiments](https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation/blob/main/My%20Movie%201%20-%20SD%20480p.mov)
+https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation/blob/main/My%20Movie%201%20-%20SD%20480p.mov
 
 ---
 
