@@ -198,8 +198,12 @@ If you use this repository for your work, please cite:
 }
 ```
 ---
-## Video
-https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation/blob/main/My%20Movie%201%20-%20SD%20480p.mov
+---
+## 📺 Video of real-world experiments
+[![Real world mobile robot experiments](https://img.youtube.com/vi/_3-R-vLb5Ps/0.jpg)](https://www.youtube.com/watch?v=_3-R-vLb5Ps)
+*Click the image above to watch the experiment on YouTube.*
+
+---
 
 ---
 
