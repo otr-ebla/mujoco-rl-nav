@@ -198,12 +198,8 @@ If you use this repository for your work, please cite:
 }
 ```
 ---
----
 ## 📺 Video of real-world experiments
 [![Real world mobile robot experiments](https://img.youtube.com/vi/_3-R-vLb5Ps/0.jpg)](https://www.youtube.com/watch?v=_3-R-vLb5Ps)
-*Click the image above to watch the experiment on YouTube.*
-
----
 
 ---
 
