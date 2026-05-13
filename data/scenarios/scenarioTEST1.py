@@ -167,7 +167,7 @@
 
 
 import numpy as np
-from env_config import N_HUMANS
+from src.core.env_config import N_HUMANS
 
 # Scenario TEST1 (parallelo/contro-corrente) -- versione "spread" con distanza minima, 20 umani
 def scenarioTEST1(seed=None):

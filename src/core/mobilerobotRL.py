@@ -121,7 +121,7 @@ class mobilerobotRL(gym.Env):
 
             site = ET.SubElement(mobile_robot_body, "site", {
                 "name": f"lidar_site_{i}",
-                "pos": f"{0.001*np.cos(angle):.6f} {0.001*np.sin(angle):.6f} 0",
+                "pos": f"{0.001*np.cos(angle):.6f} {0.001*np.sin(angle):.6f} -0.75",
                 "size": "0.01",
                 "rgba": "1 0 0 0.3",
                 "zaxis": f"{np.cos(angle):.6f} {np.sin(angle):.6f} 0",

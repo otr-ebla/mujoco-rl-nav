@@ -147,7 +147,6 @@
 #     }
 
 
-import numpy as np
 
 # Scenario TEST2: Incrocio obliquo con flussi diagonali che si intersecano (random)
 import numpy as np

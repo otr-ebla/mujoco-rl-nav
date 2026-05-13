@@ -23,6 +23,20 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize
 from stable_baselines3.common.monitor import Monitor
 
+'''
+Script per l'addestramento di agenti RL nel contesto HAMR utilizzando Stable Baselines3.
+Supporta diversi algoritmi di RL (PPO, SAC, TD3, TQC, A2C) e include funzionalità per
+il caricamento di modelli pre-addestrati, la normalizzazione delle osservazioni e delle ricompense,
+e callback personalizzate per.
+
+Comando terminale per addestramento:
+python src/RL/trainHAMR.py --train --num_rays 51 --num_envs 36 --num_steps 10000000 --run_id my_experiment --trainer TQC
+
+Comando terminale per valutazione:
+python3 src/RL/trainHAMR.py --eval --run_id models/TQC/TQCsuper
+
+'''
+
 # ───────────────────────────────────────────────────────────────────────────────
 # Path bootstrap: consente import “from core.*” e “from RL.*” eseguendo da root
 # ───────────────────────────────────────────────────────────────────────────────
@@ -331,7 +345,7 @@ def train_agent(
 
             policy_kwargs = dict(
                 activation_fn=torch.nn.Tanh,
-                net_arch=dict(pi=[256, 256, 128], vf=[256, 256, 128]),
+                net_arch=dict(pi=[256, 128], vf=[256, 128]),
                 ortho_init=True,
                 log_std_init=-1.0,
             )
@@ -340,7 +354,7 @@ def train_agent(
                 env,
                 learning_rate=linear_schedule(3e-4),
                 n_steps=640,
-                batch_size=512,
+                batch_size=128,
                 n_epochs=10,
                 gamma=0.995,
                 gae_lambda=0.95,
@@ -372,7 +386,7 @@ def train_agent(
                 gradient_steps=1,
                 ent_coef="auto",
                 target_update_interval=1,
-                policy_kwargs={"net_arch": [256, 256], "log_std_init": -2},
+                policy_kwargs={"net_arch": [256, 128], "log_std_init": -2},
                 verbose=1,
                 device="cuda" if torch.cuda.is_available() else "cpu",
             )
@@ -415,14 +429,15 @@ def train_agent(
 
         elif trainer.lower() == "tqc":
             use_cuda = torch.cuda.is_available()
+            num_envs = getattr(env, "num_envs", 1)
+
             policy_kwargs = dict(
-                net_arch=dict(pi=[256, 256, 128], qf=[256, 256, 128]),
-                activation_fn=nn.ReLU,
+                net_arch=dict(pi=[256, 128], qf=[256, 128]),
+                activation_fn=nn.SiLU,
                 n_critics=2,
                 n_quantiles=25,
+                log_std_init=-2,       # utile anche su TQC (eredità SAC)
             )
-            buffer_size = 300_000
-            batch_size = 512 if use_cuda else 256
 
             model = TQC(
                 "MlpPolicy",
@@ -430,13 +445,16 @@ def train_agent(
                 tensorboard_log=log_dir,
                 device=("cuda" if use_cuda else "cpu"),
                 learning_rate=3e-4,
-                buffer_size=buffer_size,
-                batch_size=batch_size,
-                train_freq=(1, "step"),
-                gradient_steps=1,
+                buffer_size=int(1e6),  # ↑ da 300k se possibile
+                batch_size=(512 if use_cuda else 256),
+                train_freq=(num_envs, "step"),
+                gradient_steps=num_envs,
                 learning_starts=20_000,
                 tau=0.005,
                 gamma=0.99,
+                ent_coef="auto",            # esplicito
+                target_entropy=-2,          # opzionale (|A|=2)
+                target_update_interval=1,   # esplicito
                 policy_kwargs=policy_kwargs,
                 verbose=1,
             )
@@ -574,7 +592,7 @@ if __name__ == "__main__":
     parser.add_argument("--run_id", type=str, default="DEFAULT", help="Run ID for logging and saving.")
     parser.add_argument("--trainer", type=str, default="TQC", help="Trainer: PPO, SAC, TD3, TQC, A2C, or BC.")
     parser.add_argument("--num_obst", type=int, default=51, help="(legacy) Number of obstacles.")
-    parser.add_argument("--no-stacking", action="true", help="Disable observation stacking.")
+    parser.add_argument("--no-stacking", action="store_true", help="Disable observation stacking.")
     parser.add_argument("--n_stacking", type=int, default=N_STACKING, help="Number of stacked observations.")
     parser.add_argument("--CL", action="store_true", help="Enable Curriculum Learning.")
     parser.add_argument("--bc_path", type=str, default="bc_policy", help="Path to the pre-trained BC policy model.")

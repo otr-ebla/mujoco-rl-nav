@@ -63,6 +63,7 @@ def on_press(key):
 def on_release(key):
     try: key_pressed.discard(key.char)
     except AttributeError: pass
+keyboard_active = False
 if keyboard_active and os.environ.get('DISPLAY', ''):
     try:
         from pynput import keyboard
@@ -104,6 +105,14 @@ class light_hamrrln(mobilerobotRL):
         self.render_mode = render_mode
         self.n_stacking = n_stacking
         self.enable_stacking = enable_stacking
+        self.lidar_max = MAX_LEN_RAY
+        self.use_inverse_lidar = True
+        self.dist_floor = float(ROBOT_RADIUS)
+
+        self.waypoints = None
+        self.current_wp_index = 0
+        self.eval_zero_reward = True   # reward-free eval by default
+
 
         # Modello MuJoCo: default sul nuovo path assets/world.xml
         self.model_path = str(ASSETS / "world.xml") if model_path is None else model_path
@@ -195,7 +204,7 @@ class light_hamrrln(mobilerobotRL):
 
         # Selezione scenario di training/eval
         self.scenarios = [
-            # scenario4.scenario4,  # abilita se vuoi
+            scenario4.scenario4,  # abilita se vuoi
             scenario5.scenario5,
             scenario6.scenario6,
             scenario7.scenario7,
@@ -204,7 +213,7 @@ class light_hamrrln(mobilerobotRL):
             scenario12.scenario12,
             scenarioTEST1.scenarioTEST1,
             scenarioTEST2.scenarioTEST2,
-            scenarioTEST3.scenarioTEST3,
+            scenarioTEST3.scenarioTEST3, # perpendicular traffic
         ]
 
         if len(self.scenarios) < 8:
@@ -254,6 +263,32 @@ class light_hamrrln(mobilerobotRL):
             obstacles_data = self._get_all_obstacles()
             if obstacles_data is not None:
                 self.obstacles = jnp.stack([obstacles_data] * self.n_humans)
+
+    def set_waypoints(self, waypoints: list[Tuple[float, float]]):
+        self.waypoints = waypoints
+        self.current_wp_index = 0
+        self.eval_zero_reward = True
+        self._set_target_position_from_waypoint()
+
+    def _set_target_position_from_waypoint(self):
+        if getattr(self, "waypoints", None) is None or len(self.waypoints) == 0:    
+            return
+
+        if self.sphere_geom_id >= 0 and self.current_wp_index < len(self.waypoints):
+            x, y = self.waypoints[self.current_wp_index]
+            self.model.geom_pos[self.sphere_geom_id, :] = [x, y, 2.0]
+            self.target_pos = np.array([x, y], dtype=np.float32)
+
+    def _advance_to_next_waypoint(self):
+        self.current_wp_index += 1  
+        if self.current_wp_index < len(self.waypoints):
+            self._set_target_position_from_waypoint()
+            self.previous_distance = np.linalg.norm(self.target_pos - self.robot_pos)
+            self.last_episode_result = None
+            return False
+        else:
+            self.last_episode_result = "success"
+            return True
 
     def _build_grid_obstacles_per_human(self):
         H = self.n_humans
@@ -337,7 +372,7 @@ class light_hamrrln(mobilerobotRL):
         self._theta_hist = deque(maxlen=THETA_HIST_LENGTH)
 
     def _initialize_observation_stacking(self):
-        self.lidar_feat_stack = deque(maxlen=2)
+        self.lidar_feat_stack = deque(maxlen=N_STACKING)
 
     def _setup_spaces(self):
         self.action_space = gym.spaces.Box(
@@ -351,18 +386,23 @@ class light_hamrrln(mobilerobotRL):
         feat_per_frame = 3 * K
         total_obs_size = 2 + feat_per_frame * 2
 
+        # bounds per le prime 2 (d, θ)
+        goal_low  = np.array([0.0, -np.pi], dtype=np.float32)
+        goal_high = np.array([np.finfo(np.float32).max, np.pi], dtype=np.float32)
+
         obs_low = np.concatenate([
-            np.full(2, -np.inf, dtype=np.float32),
+            goal_low,
             np.zeros(feat_per_frame * 2, dtype=np.float32),
         ])
         obs_high = np.concatenate([
-            np.full(2, np.inf, dtype=np.float32),
+            goal_high,
             np.ones(feat_per_frame * 2, dtype=np.float32),
         ])
 
         self.observation_space = gym.spaces.Box(
             low=obs_low, high=obs_high, shape=(total_obs_size,), dtype=np.float32
         )
+
 
     def _setup_mujoco(self):
         self.xml_model = self.load_and_modify_xml_model()
@@ -387,7 +427,14 @@ class light_hamrrln(mobilerobotRL):
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"human{i+1}")
             for i in range(self.n_humans)
         ], dtype=np.int32)
-
+        
+        self.human_mocap_ids = np.array(
+            [self.model.body_mocapid[bid] for bid in self.human_body_ids],
+            dtype=np.int32
+        )
+        if np.any(self.human_mocap_ids < 0):
+            missing = np.where(self.human_mocap_ids < 0)[0].tolist()
+            logging.error(f"Human mocap bodies not found for indices: {missing}")
     # ------------------------------------------------------------------
     # Reset / Step
     # ------------------------------------------------------------------
@@ -428,6 +475,10 @@ class light_hamrrln(mobilerobotRL):
         self._set_humans_initial_state(scenario_data)
         self._set_target_position(scenario_data)
 
+        if (not self.training) and (getattr(self, "waypoints", None) is not None) and len(self.waypoints) > 0:
+            self.current_wp_index = 0
+            self._set_target_position_from_waypoint()
+
         self.robot_pos = np.array([scenario_data["mob_robot_startposx"], scenario_data["mob_robot_startposy"]])
         self.robot_theta = scenario_data["mob_robot_start_orientation"]
         self.data.qpos[:3] = [self.robot_pos[0], self.robot_pos[1], self.robot_theta]
@@ -449,24 +500,46 @@ class light_hamrrln(mobilerobotRL):
     # ------------------------------------------------------------------
     # Osservazioni / Stato
     # ------------------------------------------------------------------
-    def _lidar_to_features(self, lidar: np.ndarray, k: int = 24, max_range: float = 10.0, short_r: float = 1.0) -> np.ndarray:
-        rays = int(self.num_rays)
-        bins = np.array_split(lidar[:rays], k)
+    def _lidar_to_features(self, lidar: np.ndarray, k: int = 24, max_range: float = None, short_r: float = 1.0) -> np.ndarray:
+        """Encoder for LiDAR data into compact features (min, mean, short-range min) normalizzati su [0,1]."""
+        if max_range is None:
+            max_range = float(getattr(self, "lidar_max", 30.0))  # default 30 m
 
-        feat_min  = np.array([np.min(b) for b in bins], dtype=np.float32)
+        rays = int(self.num_rays)
+        x = np.asarray(lidar[:rays], dtype=np.float32)
+
+        # Clamp sicurezza (se qualche inf è sfuggito): cap a max_range
+        x = np.where(np.isfinite(x), x, max_range).astype(np.float32)
+
+        bins = np.array_split(x, k)
+        feat_min  = np.array([np.min(b)  for b in bins], dtype=np.float32)
         feat_mean = np.array([np.mean(b) for b in bins], dtype=np.float32)
 
         short_bins = []
         for b in bins:
             sel = b[b <= short_r]
             if sel.size == 0:
-                short_bins.append(np.array([max_range], dtype=np.float32))
+                short_bins.append(np.array([max_range], dtype=np.float32))  # “nessun ostacolo entro short_r”
             else:
                 short_bins.append(sel)
         feat_smin = np.array([np.min(b) for b in short_bins], dtype=np.float32)
 
-        clip01 = lambda x: np.clip(x / max_range, 0.0, 1.0)
-        return np.concatenate([clip01(feat_min), clip01(feat_mean), clip01(feat_smin)]).astype(np.float32)
+        if getattr(self, "use_inverse_lidar", False):
+            # mappa d → d_floor / max(d, d_floor) ∈ (0,1]; più vicino = più grande
+            df = float(getattr(self, "dist_floor", 0.05))
+            alpha = float(getattr(self, "inv_alpha", 0.6))
+            def inv(arr: np.ndarray) -> np.ndarray:
+                arr = np.asarray(arr, dtype=np.float32)
+                # clamp distances from below, elementwise
+                arr = np.maximum(arr, df)
+                # inverse-with-power, still in [0,1], equals 1 at d=df
+                return np.clip((df / arr) ** alpha, 0.0, 1.0).astype(np.float32)
+            return np.concatenate([inv(feat_min), inv(feat_mean), inv(feat_smin)]).astype(np.float32)
+        else:
+            norm = lambda v: np.clip(v / max_range, 0.0, 1.0)
+            #out = np.concatenate([norm(feat_min), norm(feat_mean), norm(feat_smin)])
+            return np.concatenate([norm(feat_min), norm(feat_mean), norm(feat_smin)]).astype(np.float32)
+
 
     def _goal_egocentric(self) -> np.ndarray:
         dxg = float(self.target_pos[0] - self.robot_pos[0])
@@ -478,6 +551,24 @@ class light_hamrrln(mobilerobotRL):
 
     def _get_state(self) -> np.ndarray:
         current_lidar = np.asarray(self.data.sensordata[self.sensor_ids_np], dtype=np.float32)
+        true_current_lidar = current_lidar.copy()
+
+        # Let's apply random noise on current LiDAR readings
+        noise_std = 0.04 * self.lidar_max  # 1% del max range
+        noise = np.random.normal(0.0, noise_std, size=current_lidar.shape).astype(np.float32)
+        current_lidar += noise
+        current_lidar = np.clip(current_lidar, 0.0, self.lidar_max).astype(np.float32)
+
+
+
+        # Sostituisci i non-finiti (inf/NaN) con la portata massima definita
+        if not np.all(np.isfinite(current_lidar)) or current_lidar.size != self.num_rays:
+            # mantieni la verifica sulla size, ma non fallire per inf: clamp
+            if current_lidar.size != self.num_rays:
+                raise RuntimeError("Invalid LiDAR readings; check sensor IDs / model sensors.")
+            current_lidar = np.where(np.isfinite(current_lidar), current_lidar, self.lidar_max).astype(np.float32)
+
+        #print("Current LiDAR:", current_lidar)
 
         delta = self.target_pos[:2] - self.robot_pos[:2]
         distance_to_target = np.linalg.norm(delta)
@@ -488,13 +579,16 @@ class light_hamrrln(mobilerobotRL):
         relative_angle = (relative_angle + np.pi) % (2 * np.pi) - np.pi
         self.relative_angle = relative_angle
 
-        return distance_to_target, relative_angle, current_lidar
+
+        return distance_to_target, relative_angle, current_lidar, true_current_lidar
+
 
     def _get_obs(self, info: Optional[Dict[str, Any]] = None) -> np.ndarray:
-        current_target_distance, current_relative_angle, current_lidar = self._get_state()
-        goal_vec = self._goal_egocentric()
+        dist, rel_ang, current_lidar, _ = self._get_state()   # <— già calcolati
+        # goal egocentrico → POLARE (distanza, angolo)
+        goal_vec = np.array([dist, rel_ang], dtype=np.float32)
 
-        feats_t = self._lidar_to_features(current_lidar, k=24, max_range=10.0, short_r=1.0)
+        feats_t = self._lidar_to_features(current_lidar, k=24, max_range=self.lidar_max, short_r=1.0)
         if len(self.lidar_feat_stack) == 0:
             self.lidar_feat_stack.append(feats_t.copy())
         self.lidar_feat_stack.append(feats_t.copy())
@@ -502,6 +596,7 @@ class light_hamrrln(mobilerobotRL):
 
         observation = np.concatenate([goal_vec, feats_t, feats_tm1]).astype(np.float32)
         return observation
+
 
     def _get_info(self) -> Dict[str, Any]:
         if self.sphere_geom_id >= 0:
@@ -643,6 +738,22 @@ class light_hamrrln(mobilerobotRL):
         scenario_func = random.choices(self.scenarios, weights=weights, k=1)[0]
         self.current_scenario_id = self.scenario_mapping[scenario_func]
         return scenario_func()
+    
+    def _front_mask_by_index(self, arc_deg: float) -> np.ndarray:
+        n = int(self.num_rays)
+        half = int(np.ceil((arc_deg / 360.0) * n))   # ampiezza in indici
+        mask = np.zeros(n, dtype=bool)
+        # Include indici [-half, ..., 0, ..., +half] con wrap-around
+        for k in range(-half, half + 1):
+            mask[k % n] = True
+        return mask
+
+    def _front_arc_stop(self, lidar: np.ndarray, arc_deg: float = 60.0, stop_dist: float = 0.5) -> bool:
+        x = np.asarray(lidar[:int(self.num_rays)], dtype=np.float32)
+        x = np.where(np.isfinite(x), x, float(self.lidar_max)).astype(np.float32)
+        mask = self._front_mask_by_index(arc_deg)
+        return float(np.min(x[mask])) < float(stop_dist)
+
 
     def _set_humans_initial_state(self, scenario_data: Dict[str, float]):
         OFF_X, OFF_Y, OFF_TH = -1e6, 0.0, 0.0
@@ -661,10 +772,16 @@ class light_hamrrln(mobilerobotRL):
             target_pos = [gx, gy]
             human_goals.append([start_pos, target_pos])
 
-            human_id = self.human_body_ids[i - 1]
-            self.model.body_pos[human_id, :2] = start_pos
+            #human_id = self.human_body_ids[i - 1]
+            # self.model.body_pos[human_id, :2] = start_pos
+            # half = ang * 0.5
+            # self.model.body_quat[human_id] = [np.cos(half), 0.0, 0.0, np.sin(half)]
+            mocap_id = int(self.human_mocap_ids[i - 1])
+            # posa iniziale
+            self.data.mocap_pos[mocap_id]  = [x, y, 0.0]
             half = ang * 0.5
-            self.model.body_quat[human_id] = [np.cos(half), 0.0, 0.0, np.sin(half)]
+            self.data.mocap_quat[mocap_id] = [np.cos(half), 0.0, 0.0, np.sin(half)]
+
 
         self.humans_goals = jnp.array(human_goals, dtype=jnp.float32)
         self.humans_current_goals = jnp.array([g[0] for g in human_goals], dtype=jnp.float32)
@@ -679,13 +796,16 @@ class light_hamrrln(mobilerobotRL):
     def _initialize_humans_tracking(self):
         self.humans_state_numpy = np.zeros((self.n_humans, 6), dtype=np.float32)
         for i in range(self.n_humans):
-            human_id = self.human_body_ids[i]
-            self.humans_state_numpy[i, :2] = self.model.body_pos[human_id, :2]
+            mocap_id = int(self.human_mocap_ids[i])
+            px, py, pz = self.data.mocap_pos[mocap_id]
+            qw, qx, qy, qz = self.data.mocap_quat[mocap_id]
+            theta = np.arctan2(2*(qw*qz + qx*qy), 1 - 2*(qy*qy + qz*qz))
+
+            self.humans_state_numpy[i, :2] = [px, py]
             self.humans_state_numpy[i, 2:4] = 0.0
-            w, x, y, z = self.model.body_quat[human_id]
-            theta = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
             self.humans_state_numpy[i, 4] = theta
             self.humans_state_numpy[i, 5] = 0.0
+
 
     # ------------------------------------------------------------------
     # Ricompense / terminazioni
@@ -707,6 +827,39 @@ class light_hamrrln(mobilerobotRL):
         proximity = np.clip((LIDAR_THRESHOLD - min_lidar) / denom, 0.0, 1.0)
         w_lidar = LIDAR_WEIGHT
         return -w_lidar * float(proximity)
+    
+    def _front_cone_penalty(self, lidar: np.ndarray,
+                        arc_deg: float = 90.0,
+                        hard: float = None,
+                        soft: float = None,
+                        weight: float = 0.3) -> float:
+        """
+        Penalità continua in [-weight, 0]:
+        - piena (=-weight) se d_min <= hard
+        - zero se d_min >= soft
+        - lineare tra hard e soft
+        """
+        x = np.asarray(lidar[:int(self.num_rays)], dtype=np.float32)
+        x = np.where(np.isfinite(x), x, float(self.lidar_max)).astype(np.float32)
+
+        # soglie default coerenti con il robot
+        if hard is None: hard = float(self.robot_radius + 0.05)  # stop molto vicino
+        if soft is None: soft = float(self.robot_radius + 0.50)  # soglia di “comfort”
+
+        mask = self._front_mask_by_index(arc_deg)
+        if not np.any(mask):
+            return 0.0
+
+        d_min = float(np.min(x[mask]))
+
+        if d_min <= hard:
+            return -float(weight)
+        if d_min >= soft:
+            return 0.0
+
+        # interpolazione lineare tra hard (penalità piena) e soft (nessuna penalità)
+        alpha = (soft - d_min) / max(1e-6, (soft - hard))   # ∈ (0,1)
+        return -float(weight) * alpha
 
     def _orientation_smoothness_penalty(self) -> float:
         if not hasattr(self, "_theta_hist") or len(self._theta_hist) < 2:
@@ -737,15 +890,21 @@ class light_hamrrln(mobilerobotRL):
         step_reward = 0.0
         terminated, truncated = False, False
 
-        current_target_distance, current_relative_angle, current_lidar = self._get_state()
+        current_target_distance, current_relative_angle, current_lidar, true_current_lidar = self._get_state()
 
-        if self._collision_detection(current_lidar):
+        # --- Collision handling (unchanged) ---
+        if self._collision_detection(true_current_lidar):
             self.last_episode_result = "collision"
             terminated = True
             step_reward += -70.0
             info["steps_taken"] = self.current_step
             info["episode_time_length"] = self.episode_time
             info["episode_result"] = "collision"
+
+            # Zero rewards in testing if requested
+            if (not self.training) and getattr(self, "eval_zero_reward", False) and (getattr(self, "waypoints", None) is not None):
+                step_reward = 0.0
+
             if DEBUG:
                 if not hasattr(self, "progress_reward_term"): self.progress_reward_term = 0.0
                 if not hasattr(self, "laser_reward_term"): self.laser_reward_term = 0.0
@@ -754,6 +913,7 @@ class light_hamrrln(mobilerobotRL):
                 return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
             return step_reward, terminated, truncated
 
+        # --- Rewards/penalties (training as before; eval can be zeroed later) ---
         if self.training:
             sr = float(getattr(self, "success_rate", 0.0))
             s0 = float(getattr(self, "progress_reward_scale_initial", 0.04))
@@ -766,26 +926,66 @@ class light_hamrrln(mobilerobotRL):
         step_reward += progress_reward
 
         angle_norm = abs(float(current_relative_angle)) / np.pi
-        angle_reward = -0.05 * angle_norm
-        angle_reward = float(np.clip(angle_reward, -0.1, 0.0))
+        angle_reward = float(np.clip(-0.05 * angle_norm, -0.1, 0.0))
         step_reward += angle_reward
 
-        lidar_reward = self._lasers_reward(current_lidar)
-        lidar_reward = float(np.clip(lidar_reward, -1.0, 0.0))
+        lidar_reward = float(np.clip(self._lasers_reward(current_lidar), -1.0, 0.0))
         step_reward += lidar_reward
 
-        theta_smoothness_penalty = self._orientation_smoothness_penalty()
-        theta_smoothness_penalty = float(np.clip(theta_smoothness_penalty, -0.3, 0.0))
+        front_cone_pen = self._front_cone_penalty(
+            current_lidar, arc_deg=90.0,
+            hard=self.robot_radius + 0.05,
+            soft=self.robot_radius + 0.70,
+            weight=0.3
+        )
+        step_reward += front_cone_pen
+
+        theta_smoothness_penalty = float(np.clip(self._orientation_smoothness_penalty(), -0.3, 0.0))
         step_reward += theta_smoothness_penalty
 
+        # --- Success / Waypoint logic ---
         if current_target_distance <= ROBOT_RADIUS + 0.3:
+            has_wps = (getattr(self, "waypoints", None) is not None)
+            if has_wps and (self.current_wp_index < len(self.waypoints)) and (not self.training):
+                # Advance to next waypoint; keep episode alive until final
+                finished = self._advance_to_next_waypoint()
+                if not finished:
+                    # Intermediate waypoint reached
+                    info["episode_result"] = "waypoint_reached"
+                    info["current_waypoint_index"] = int(self.current_wp_index)
+                    # Ensure progress baseline is updated for the new target
+                    try:
+                        self.previous_distance = float(np.linalg.norm(self.target_pos - self.robot_pos))
+                    except Exception:
+                        pass
+                    # Zero reward in evaluation if requested
+                    if getattr(self, "eval_zero_reward", False):
+                        step_reward = 0.0
+
+                    if DEBUG:
+                        if not hasattr(self, "angle_reward_term"): self.angle_reward_term = 0.0
+                        self.progress_reward_term += progress_reward
+                        self.laser_reward_term += lidar_reward
+                        self.progress_orientation_smoothness_term += theta_smoothness_penalty
+                        self.angle_reward_term += angle_reward
+                        return step_reward, False, False, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
+                    return step_reward, False, False
+
+            # Final success (single-goal OR last waypoint)
             self.last_episode_result = "success"
             terminated = True
-            step_reward += 200.0
             info["steps_taken"] = self.current_step
             info["episode_time_length"] = episode_time
             info["episode_result"] = "success"
+
+            # Zero rewards in testing if requested
+            if (not self.training) and getattr(self, "eval_zero_reward", False) and (getattr(self, "waypoints", None) is not None):
+                step_reward = 0.0
+            else:
+                step_reward += 200.0
+
             self.previous_distance = float(current_target_distance)
+
             if DEBUG:
                 if not hasattr(self, "angle_reward_term"): self.angle_reward_term = 0.0
                 self.progress_reward_term += progress_reward
@@ -795,6 +995,7 @@ class light_hamrrln(mobilerobotRL):
                 return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_term
             return step_reward, terminated, truncated
 
+        # --- Timeout (unchanged) ---
         if self.robot_action_counter * self.robot_dt > self.max_episode_time:
             self.last_episode_result = "timeout"
             truncated = True
@@ -802,6 +1003,11 @@ class light_hamrrln(mobilerobotRL):
             info["episode_time_length"] = self.episode_time
             info["episode_result"] = "timeout"
             self.previous_distance = float(current_target_distance)
+
+            # Zero rewards in testing if requested
+            if (not self.training) and getattr(self, "eval_zero_reward", False) and (getattr(self, "waypoints", None) is not None):
+                step_reward = 0.0
+
             if DEBUG:
                 if not hasattr(self, "angle_reward_term"): self.angle_reward_term = 0.0
                 self.progress_reward_term += progress_reward
@@ -811,7 +1017,12 @@ class light_hamrrln(mobilerobotRL):
                 return step_reward, terminated, truncated, self.progress_reward_term, self.laser_reward_term, self.progress_orientation_smoothness_penalty
             return step_reward, terminated, truncated
 
+        # --- Ongoing step (update distance baseline) ---
         self.previous_distance = float(current_target_distance)
+
+        # Zero all step rewards during evaluation with waypoints if requested
+        if (not self.training) and getattr(self, "eval_zero_reward", False) and (getattr(self, "waypoints", None) is not None):
+            step_reward = 0.0
 
         if DEBUG:
             if not hasattr(self, "angle_reward_term"): self.angle_reward_term = 0.0
@@ -823,6 +1034,7 @@ class light_hamrrln(mobilerobotRL):
 
         return step_reward, terminated, truncated
 
+
     # ------------------------------------------------------------------
     # Umani / HSFM
     # ------------------------------------------------------------------
@@ -832,6 +1044,15 @@ class light_hamrrln(mobilerobotRL):
             max_lin_vel = MAX_LIN_VEL_ROBOT
             lin_vel = float(action[0]) * max_lin_vel
             ang_vel = float(action[1])
+
+            
+
+            # --- Safety stop: se ostacolo < 0.5 m nei 45° frontali, blocca avanti ---
+            current_lidar = np.asarray(self.data.sensordata[self.sensor_ids_np], dtype=np.float32)
+            if not np.all(np.isfinite(current_lidar)):
+                current_lidar = np.where(np.isfinite(current_lidar), current_lidar, self.lidar_max).astype(np.float32)
+            if self._front_arc_stop(current_lidar, arc_deg=80.0, stop_dist=ROBOT_RADIUS + 0.7) and lin_vel > 0.1 and self.previous_distance > 1.8:
+                lin_vel = 0.0
 
             x, y, theta = self.robot_pos[0], self.robot_pos[1], self.robot_theta
 
@@ -856,8 +1077,8 @@ class light_hamrrln(mobilerobotRL):
             self.robot_pos = np.array([x, y], dtype=np.float32)
             self.robot_theta = theta
         else:
-            step_size = 0.1
-            rotation_step = 0.1
+            step_size = 0.01
+            rotation_step = 0.01
             yaw = self.data.qpos[2]
             forward_x = np.cos(yaw)
             forward_y = np.sin(yaw)
@@ -957,12 +1178,15 @@ class light_hamrrln(mobilerobotRL):
 
     def _update_human_positions_in_mujoco(self):
         for i in range(self.n_humans):
-            human_id = self.human_body_ids[i]
-            pos = self.humans_state_numpy[i, :2]
-            orientation = self.humans_state_numpy[i, 4]
-            self.model.body_pos[human_id, :] = [pos[0], pos[1], 0.0]
-            half_angle = orientation / 2
-            self.model.body_quat[human_id] = [np.cos(half_angle), 0., 0., np.sin(half_angle)]
+            mocap_id = int(self.human_mocap_ids[i])
+            px, py = self.humans_state_numpy[i, 0], self.humans_state_numpy[i, 1]
+            th = self.humans_state_numpy[i, 4]
+            self.data.mocap_pos[mocap_id]  = [px, py, 0.0]
+            self.data.mocap_quat[mocap_id] = [np.cos(th/2.0), 0.0, 0.0, np.sin(th/2.0)]
+
+        # importantissimo: ricomputa kinematics dopo aver mosso i mocap
+        mujoco.mj_forward(self.model, self.data)
+
 
     # ------------------------------------------------------------------
     # Ostacoli / Grid

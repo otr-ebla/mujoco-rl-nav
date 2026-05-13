@@ -35,7 +35,7 @@
     <material name="human20_material" rgba="0.2 0.4 0.8 1"/>    <!-- Sky Blue -->
 
     <mesh name="room_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/Floor_hospital_new.stl"/>
-    <mesh name="robot_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/E30cm.stl"/>
+    <mesh name="robot_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/Robot2.stl"/>
     <mesh name="human_mesh" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/ybot.stl"/>
     <mesh name="human_mesh_reversed" file="/home/LABAUT/alberto_vaglio/HumanAwareRLNavigation/assets/ybotr.stl"/>
   </asset>
@@ -57,10 +57,12 @@
       <joint name="slider_y" type="slide" axis="0 1 0"/>
       <joint name="hinge_z" type="hinge" axis="0 0 1"/>
       <!-- Arrow shaft -->
-      <geom name="arrow_shaft" type="box" size="0.5 0.1 0.05" pos="0 0 0.5" material="arrow_material"/>
-      <!-- Arrow head - two triangular shapes -->
-      <geom name="arrow_head1" type="box" size="0.15 0.05 0.05" pos="0.5 0.1 0.5" euler="0 0 -45" material="arrow_material"/>
-      <geom name="arrow_head2" type="box" size="0.15 0.05 0.05" pos="0.5 -0.1 0.5" euler="0 0 45" material="arrow_material"/>
+      <!-- 0.6x scaled arrow -->
+        <geom name="arrow_shaft" type="box" size="0.30 0.06 0.03" pos="0 0 0.30" material="arrow_material"/>
+
+        <geom name="arrow_head1" type="box" size="0.09 0.03 0.03" pos="0.30 0.06 0.30" euler="0 0 -45" material="arrow_material"/>
+        <geom name="arrow_head2" type="box" size="0.09 0.03 0.03" pos="0.30 -0.06 0.30" euler="0 0 45"  material="arrow_material"/>
+
     </body>
 
     <geom name="sphere" type="sphere" size="0.5" pos="0 0 2" material="sphere_material"/>
@@ -70,84 +72,104 @@
     </body>
 
     <!-- 20 Humans with different colors -->
-    <body name="human1" pos="10 0 0" euler="0 0 -0">
-      <geom name="human1_geom" type="mesh" mesh="human_mesh" material="human1_material"/>
-    </body>
-    
-    <body name="human2" pos="10 -2 0" euler="0 0 -0">
-      <geom name="human2_geom" type="mesh" mesh="human_mesh_reversed" material="human2_material"/>
-    </body>
-    
-    <body name="human3" pos="10 -4 0" euler="0 0 -0">
-      <geom name="human3_geom" type="mesh" mesh="human_mesh" material="human3_material"/>
-    </body>
-    
-    <body name="human4" pos="10 -6 0" euler="0 0 -0">
-      <geom name="human4_geom" type="mesh" mesh="human_mesh_reversed" material="human4_material"/>
-    </body>
-    
-    <body name="human5" pos="10 -8 0" euler="0 0 -0">
-      <geom name="human5_geom" type="mesh" mesh="human_mesh" material="human5_material"/>
-    </body>
-    
-    <body name="human6" pos="10 -10 0" euler="0 0 -0">
-      <geom name="human6_geom" type="mesh" mesh="human_mesh_reversed" material="human6_material"/>
+    <body name="human1" mocap="true" pos="0 0 0">
+      <geom name="human1_vis" type="mesh" mesh="human_mesh" material="human1_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human7" pos="10 -12 0" euler="0 0 -0">
-      <geom name="human7_geom" type="mesh" mesh="human_mesh" material="human7_material"/>
+    <body name="human2" mocap="true" pos="0 0 0">
+      <geom name="human2_vis" type="mesh" mesh="human_mesh" material="human2_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human8" pos="10 -14 0" euler="0 0 -0">
-      <geom name="human8_geom" type="mesh" mesh="human_mesh" material="human8_material"/>
+    <body name="human3" mocap="true" pos="0 0 0">
+      <geom name="human3_vis" type="mesh" mesh="human_mesh" material="human3_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human9" pos="10 -16 0" euler="0 0 -0">
-      <geom name="human9_geom" type="mesh" mesh="human_mesh_reversed" material="human9_material"/>
+    <body name="human4" mocap="true" pos="0 0 0">
+      <geom name="human4_vis" type="mesh" mesh="human_mesh" material="human4_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human10" pos="10 -18 0" euler="0 0 -0">
-      <geom name="human10_geom" type="mesh" mesh="human_mesh" material="human10_material"/>
+    <body name="human5" mocap="true" pos="0 0 0">
+      <geom name="human5_vis" type="mesh" mesh="human_mesh" material="human5_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human11" pos="10 -20 0" euler="0 0 -0">
-      <geom name="human11_geom" type="mesh" mesh="human_mesh_reversed" material="human11_material"/>
+    <body name="human6" mocap="true" pos="0 0 0">
+      <geom name="human6_vis" type="mesh" mesh="human_mesh" material="human6_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human12" pos="10 -22 0" euler="0 0 -0">
-      <geom name="human12_geom" type="mesh" mesh="human_mesh" material="human12_material"/>
+    <body name="human7" mocap="true" pos="0 0 0">
+      <geom name="human7_vis" type="mesh" mesh="human_mesh" material="human7_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human13" pos="10 -24 0" euler="0 0 -0">
-      <geom name="human13_geom" type="mesh" mesh="human_mesh_reversed" material="human13_material"/>
+    <body name="human8" mocap="true" pos="0 0 0">
+      <geom name="human8_vis" type="mesh" mesh="human_mesh" material="human8_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human14" pos="10 -26 0" euler="0 0 -0">
-      <geom name="human14_geom" type="mesh" mesh="human_mesh" material="human14_material"/>
+    <body name="human9" mocap="true" pos="0 0 0">
+      <geom name="human9_vis" type="mesh" mesh="human_mesh" material="human9_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human15" pos="10 -28 0" euler="0 0 -0">
-      <geom name="human15_geom" type="mesh" mesh="human_mesh_reversed" material="human15_material"/>
+    <body name="human10" mocap="true" pos="0 0 0">
+      <geom name="human10_vis" type="mesh" mesh="human_mesh" material="human10_material"
+        contype="0" conaffinity="0"/>
     </body>
 
-    <body name="human16" pos="10 -30 0" euler="0 0 -0">
-      <geom name="human16_geom" type="mesh" mesh="human_mesh" material="human16_material"/>
+    <body name="human11" mocap="true" pos="0 0 0">
+      <geom name="human11_vis" type="mesh" mesh="human_mesh_reversed" material="human11_material"
+        contype="1" conaffinity="1"/>
     </body>
 
-    <body name="human17" pos="10 -32 0" euler="0 0 -0">
-      <geom name="human17_geom" type="mesh" mesh="human_mesh_reversed" material="human17_material"/>
+    <body name="human12" mocap="true" pos="0 0 0">
+      <geom name="human12_vis" type="mesh" mesh="human_mesh_reversed" material="human12_material"
+        contype="1" conaffinity="1"/>
     </body>
 
-    <body name="human18" pos="10 -34 0" euler="0 0 -0">
-      <geom name="human18_geom" type="mesh" mesh="human_mesh" material="human18_material"/>
+    <body name="human13" mocap="true" pos="0 0 0">
+      <geom name="human13_vis" type="mesh" mesh="human_mesh_reversed" material="human13_material"
+        contype="1" conaffinity="1"/>
     </body>
 
-    <body name="human19" pos="10 -36 0" euler="0 0 -0">
-      <geom name="human19_geom" type="mesh" mesh="human_mesh_reversed" material="human19_material"/>
+    <body name="human14" mocap="true" pos="0 0 0">
+      <geom name="human14_vis" type="mesh" mesh="human_mesh_reversed" material="human14_material"
+        contype="1" conaffinity="1"/>
     </body>
 
-    <body name="human20" pos="10 -38 0" euler="0 0 -0">
-      <geom name="human20_geom" type="mesh" mesh="human_mesh" material="human20_material"/>
+    <body name="human15" mocap="true" pos="0 0 0">
+      <geom name="human15_vis" type="mesh" mesh="human_mesh_reversed" material="human15_material"
+        contype="1" conaffinity="1"/>
+    </body>
+
+    <body name="human16" mocap="true" pos="0 0 0">
+      <geom name="human16_vis" type="mesh" mesh="human_mesh_reversed" material="human16_material"
+        contype="1" conaffinity="1"/>
+    </body>
+
+    <body name="human17" mocap="true" pos="0 0 0">
+      <geom name="human17_vis" type="mesh" mesh="human_mesh_reversed" material="human17_material"
+        contype="1" conaffinity="1"/>
+    </body>
+
+    <body name="human18" mocap="true" pos="0 0 0">
+      <geom name="human18_vis" type="mesh" mesh="human_mesh_reversed" material="human18_material"
+        contype="1" conaffinity="1"/>
+    </body>
+
+    <body name="human19" mocap="true" pos="0 0 0">
+      <geom name="human19_vis" type="mesh" mesh="human_mesh_reversed" material="human19_material"
+        contype="1" conaffinity="1"/>
+    </body>
+
+    <body name="human20" mocap="true" pos="0 0 0">
+      <geom name="human20_vis" type="mesh" mesh="human_mesh_reversed" material="human20_material"
+        contype="1" conaffinity="1"/>
     </body>
 
   </worldbody>

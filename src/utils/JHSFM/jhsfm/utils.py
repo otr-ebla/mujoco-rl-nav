@@ -4,7 +4,7 @@ from jax import jit, vmap, lax, debug, random
 # TODO: Add generate random humans parameters function
 # TODO: Add function to generate animation of simulation
 
-from env_config import N_HUMANS, HUMANS_VELOCITY, HUMANS_RADIUS
+from src.core.env_config import N_HUMANS, HUMANS_VELOCITY, HUMANS_RADIUS
 
 def get_standard_humans_parameters(n_humans:int):
     """

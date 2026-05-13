@@ -1,0 +1,24 @@
+Thu Oct  9 16:13:25 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 0. The simulation is unstable. Time = 11.6120.
+
+Thu Oct  9 17:10:38 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 113. The simulation is unstable. Time = 0.0660.
+
+Thu Oct  9 17:18:13 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 113. The simulation is unstable. Time = 0.0660.
+
+Thu Oct  9 17:18:54 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 113. The simulation is unstable. Time = 0.0660.
+
+Thu Oct  9 17:19:27 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 113. The simulation is unstable. Time = 0.0660.
+
+Thu Oct  9 17:23:37 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 113. The simulation is unstable. Time = 0.0660.
+
+Thu Oct  9 17:25:43 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 113. The simulation is unstable. Time = 0.0660.
+
+Thu Oct 16 15:00:58 2025
+ERROR: could not initialize GLFW
+
