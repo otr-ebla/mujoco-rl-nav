@@ -1,3 +1,16 @@
+# End-to-End Social Robot Navigation with Reinforcement Learning
+
+[![Conference](https://img.shields.io/badge/Conference-IEEE_ICARM_2026-blue)](#)
+
+> **Official repository for the paper:**
+> 
+> **"End-to-End Social Robot Navigation with Reinforcement Learning: A comparative study in human-populated indoor environments"**
+> 
+> *Alberto Vaglio, A. Garulli, A. Giannitrapani, R. Quartullo, T. Van Der Meer* 
+> *University of Siena — Dept. of Information Engineering and Mathematics*
+
+---
+
 # 🤖 MuJoCo Human-Aware Mobile Robot RL Navigation
 
 <p align="center">
@@ -29,7 +42,7 @@ Develop a fully autonomous RL agent that enables a mobile robot to:
 - 🧠 **End-to-end RL pipeline** from sensor input to motion control  
 - 🤝 Human-aware navigation with reward shaping or social constraints  
 - 📡 Laser range data as the sole observation space  
-- 🧩 Realistic simulation via the MuJoCo physics engine  
+- 🧩 Realistic simulation via the MuJoCo physics engine, featuring bipedal pedestrian mechanics where the target foot position is computed statically once at the beginning of the stance phase
 - ⚙️ **Training support for TQC, SAC, PPO** via Stable-Baselines3  
 - 🧪 Evaluation mode for testing trained policies  
 - 🧱 Modular environment and training setup for experimentation  
@@ -40,170 +53,5 @@ Develop a fully autonomous RL agent that enables a mobile robot to:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation.git
+   git clone [https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation.git](https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation.git)
    cd MuJoCo_HumanAware_MobileRobot_RLNavigation
-   ```
-
-2. **Create and activate a Python virtual environment**
-   ```bash
-   python3 -m venv mujoco_env
-   source mujoco_env/bin/activate     # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **(Optional) Verify MuJoCo installation**
-   ```bash
-   python -c "import mujoco; print('MuJoCo version:', mujoco.__version__)"
-   ```
-
----
-
-## 🧩 Project Structure
-
-```
-HumanAwareRLNavigation2/
-│
-├── assets/              # STL meshes, XML world file, policies & callbacks
-├── data/                # Scenarios, expert data, social metrics
-├── logs/                # Training logs and policy checkpoints
-├── models/              # Saved trained models
-├── results/             # Plots and aggregated metrics
-└── src/
-    ├── core/            # Environment and robot physics (lightHAMRRLN, mobilerobotRL)
-    ├── RL/              # Training scripts and neural policies
-    ├── imitation_learning/  # IL data generation and BC pretraining
-    ├── evaluation/      # Evaluation and visualization utilities
-    └── utils/           # HSFM, grid decomposition, helper classes
-```
-
----
-
-## 🧠 Using the Environment (`lightHAMRRLN.py`)
-
-`lightHAMRRLN.py` defines the **Gymnasium-compatible environment** that encapsulates:
-- Robot motion dynamics
-- Human-aware Social Force Model (HSFM)
-- Reward shaping and termination logic
-- LiDAR observation processing
-
-You can directly instantiate and interact with it for testing:
-
-```bash
-source mujoco_env/bin/activate
-cd HumanAwareRLNavigation2
-
-python - <<'EOF'
-from core.lightHAMRRLN import light_hamrrln
-
-env = light_hamrrln(training=False, render_mode="human")
-obs, info = env.reset()
-print("Observation shape:", obs.shape)
-
-for _ in range(500):
-    action = env.action_space.sample()
-    obs, reward, terminated, truncated, info = env.step(action)
-    if terminated or truncated:
-        obs, info = env.reset()
-env.close()
-EOF
-```
-
----
-
-## 🚀 Training an RL Agent (`trainHAMR.py`)
-
-The main training and evaluation entrypoint is `src/RL/trainHAMR.py`.  
-It supports **TQC**, **SAC**, **PPO**, **TD3**, and **A2C** algorithms.
-
-### ▶️ Basic Training Command
-
-Train a new agent (e.g., TQC) with 8 parallel environments for 10M steps:
-
-```bash
-source mujoco_env/bin/activate
-cd HumanAwareRLNavigation2/src/RL
-
-python trainHAMR.py --train     --trainer TQC     --num_envs 8     --num_steps 10000000     --run_id TQCrun1    
-```
-
-All training logs and checkpoints will be saved in:
-```
-logs/TENSORBOARD/
-logs/policy_checkpoints/
-```
-
-You can monitor training progress in TensorBoard:
-```bash
-tensorboard --logdir logs/TENSORBOARD
-```
-
----
-
-### ⚙️ Other Training Options
-
-- `--trainer [PPO|SAC|TD3|TQC|A2C]` → choose algorithm  
-- `--num_envs N` → number of parallel environments  
-- `--num_steps N` → total timesteps  
-- `--run_id NAME` → unique name for the experiment  
-- `--CL` → resume from a previous curriculum learning stage  
-- `--bc_path PATH` → load a Behavior Cloning warm-start policy  
-- `--render_training` → visualize training (single env only)  
-- `--init_from RUNID` → start from weights of another run  
-- `--force` → overwrite previous run with same ID  
-
-Example:
-```bash
-python trainHAMR.py --train --trainer PPO --num_envs 4 --num_steps 5000000 --run_id PPOrun1
-```
-
----
-
-### 🧪 Evaluating a Trained Agent
-
-To test a trained model visually:
-
-```bash
-python trainHAMR.py --eval     --trainer TQC     --run_id TQCsuper    
-```
-
-This will:
-- Load the saved model from `logs/policy_checkpoints/`
-- Use the stored normalization stats (`.pkl`)
-- Launch MuJoCo viewer for visual playback
-
----
-
-## 💾 Checkpoints & Normalization Files
-
-- Models are saved as `.zip` in `logs/policy_checkpoints/`
-- Normalization stats (`VecNormalize`) saved in `logs/TENSORBOARD/*.pkl`
-- You can resume training by reusing the same `--run_id` and adding `--CL`
-
----
-
-## 🧱 Citation
-
-If you use this repository for your work, please cite:
-
-```bibtex
-@software{HumanAwareRLNavigation,
-  author = {Vaglio, Alberto},
-  title = {Human-Aware RL Navigation in MuJoCo},
-  year = {2025},
-  url = {https://github.com/otr-ebla/MuJoCo_HumanAware_MobileRobot_RLNavigation}
-}
-```
----
-## 📺 Video of real-world experiments
-[![Real world mobile robot experiments](https://img.youtube.com/vi/_3-R-vLb5Ps/0.jpg)](https://www.youtube.com/watch?v=_3-R-vLb5Ps)
-
----
-
-## 📧 Contact
-
-For questions or collaboration:
-**alberto.vaglio@student.unisi.it**
