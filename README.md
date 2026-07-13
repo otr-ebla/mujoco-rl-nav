@@ -1,6 +1,6 @@
 # End-to-End Social Robot Navigation with Reinforcement Learning
 
-[![Conference](https://img.shields.io/badge/Conference-IEEE_ICARM_2026-blue)](#)
+[![Conference](https://img.shields.io/badge/Conference-IEEE_ARM_2026-blue)](#)
 
 > **Official repository for the paper:**
 > 
